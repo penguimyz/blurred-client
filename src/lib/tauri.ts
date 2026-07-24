@@ -233,8 +233,11 @@ export async function onInstanceLog(
 
 // ---- accounts (offline) ----
 
-export function createOfflineAccount(username: string): Promise<Account> {
-  return invoke("create_offline_account", { username });
+/** Create an offline account. Takes no username: the offline identity is always
+ * your signed-in Microsoft username (anti-impersonation), and requires a
+ * Microsoft account that owns the game to exist first (anti-piracy). */
+export function createOfflineAccount(): Promise<Account> {
+  return invoke("create_offline_account");
 }
 
 export function listAccounts(): Promise<Account[]> {

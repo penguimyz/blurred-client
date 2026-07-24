@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useAccountStore } from "../store/accountStore";
-import { useSettingsStore } from "../store/settingsStore";
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
 import { MicrosoftLoginButton } from "../components/MicrosoftLoginButton";
@@ -68,9 +67,7 @@ function AccountCard({ account, active, onActivate, onRemove }: { account: Accou
 
 export function Accounts() {
   const { accounts, refresh, remove, setActive } = useAccountStore();
-  const settings = useSettingsStore((s) => s.settings);
   const [adding, setAdding] = useState(false);
-  const [offlineName, setOfflineName] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -78,17 +75,18 @@ export function Accounts() {
   }, [refresh]);
 
   const activeId = [...accounts].sort((a, b) => (b.lastUsed ?? "").localeCompare(a.lastUsed ?? ""))[0]?.id;
-  const offlineValid = /^[A-Za-z0-9_]{3,16}$/.test(offlineName.trim());
-  // Offline accounts require a Microsoft account (proof of ownership) on file —
-  // the anti-piracy gate, mirrored from the backend. Dev override unlocks it too.
-  const offlineAllowed =
-    accounts.some((a) => a.accountType === "microsoft") || (settings?.allowOfflineWithoutMsa ?? false);
+  // Offline accounts require a Microsoft account (proof of ownership) and always
+  // inherit its username (anti-impersonation) — both enforced in the backend.
+  // This is the Microsoft account an offline copy would derive from.
+  const activeMsUsername =
+    [...accounts]
+      .filter((a) => a.accountType === "microsoft")
+      .sort((a, b) => (b.lastUsed ?? "").localeCompare(a.lastUsed ?? ""))[0]?.username ?? null;
 
   async function addOffline() {
     setError(null);
     try {
-      await createOfflineAccount(offlineName.trim());
-      setOfflineName("");
+      await createOfflineAccount();
       setAdding(false);
       await refresh();
     } catch (e) {
@@ -126,17 +124,15 @@ export function Accounts() {
             <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>OR OFFLINE</span>
             <div style={{ flex: 1, height: 1, background: "var(--glass-border)" }} />
           </div>
-          {offlineAllowed ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
-                value={offlineName}
-                onChange={(e) => setOfflineName(e.target.value)}
-                placeholder="Offline username"
-                spellCheck={false}
-                style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 13 }}
-              />
-              <button className="accent" onClick={addOffline} disabled={!offlineValid} style={{ opacity: offlineValid ? 1 : 0.5 }}>
-                Add
+          {activeMsUsername ? (
+            <div>
+              <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 10px" }}>
+                Offline accounts use your Microsoft username — this makes an
+                offline-playable copy of <strong>{activeMsUsername}</strong> for
+                LAN/singleplayer. (You can't set it to another player's name.)
+              </p>
+              <button className="accent" onClick={addOffline}>
+                Add offline copy of {activeMsUsername}
               </button>
             </div>
           ) : (

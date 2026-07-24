@@ -48,14 +48,19 @@ with the same deterministic offline UUID vanilla uses
 `online-mode=false` servers; they do not and cannot reach online servers, Realms,
 or any authenticated Mojang service.
 
-**Offline mode is gated behind ownership.** An offline account can only be
-created once a Microsoft account that owns Minecraft has signed in — enforced in
-the backend (`create_offline_account`), not just the UI. So offline mode means
-"play the copy you own without a live connection," never "play without owning the
-game." There is intentionally **no in-app switch** to bypass this; the only
-override is a hidden `settings.json` developer flag (`allowOfflineWithoutMsa`,
-default `false`) for local testing before the Azure app is approved. This is the
-deliberate design difference from launchers like TLauncher.
+**Offline mode is gated behind ownership, and can't impersonate anyone.** Two
+rules, both enforced in the backend (`create_offline_account`), with **no bypass
+of any kind** — no setting, no flag, no environment variable:
+
+1. An offline account can only be created once a Microsoft account that owns
+   Minecraft has signed in — so offline mode means "play the copy you own without
+   a live connection," never "play without owning the game."
+2. The offline identity is **always your Microsoft username** — there is no
+   free-text username field, so an offline account can never be set to another
+   player's name.
+
+An offline account is simply the offline-playable form of your owned Microsoft
+identity. This is the deliberate design difference from launchers like TLauncher.
 
 Accounts of either type are managed (add / switch / remove) from the **Accounts**
 tab.

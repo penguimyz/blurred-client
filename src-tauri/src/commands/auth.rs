@@ -47,34 +47,31 @@ fn validate_username(name: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn create_offline_account(
-    state: State<'_, AppState>,
-    username: String,
-) -> Result<Account, String> {
-    let username = username.trim().to_string();
-    validate_username(&username)?;
-
-    // Anti-piracy gate (see GlobalSettings::allow_offline_without_msa): offline
-    // accounts require at least one Microsoft account that owns the game to be on
-    // file first. This is what keeps offline mode from being a TLauncher-style
-    // "play without owning it" path — it's only for playing an owned copy on
-    // LAN/singleplayer. The dev override (settings flag or env var) exists so the
-    // app is testable locally before the Azure app is approved.
-    let has_microsoft = state
-        .accounts
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|a| a.account_type == AccountType::Microsoft);
-    let dev_override = state.settings.lock().unwrap().allow_offline_without_msa
-        || std::env::var("BLURRED_DEV_ALLOW_OFFLINE").is_ok();
-    if !has_microsoft && !dev_override {
-        return Err(
-            "Sign in with a Microsoft account that owns Minecraft before adding an offline account. \
-             Offline mode is for playing your owned copy on LAN/singleplayer — not for playing without owning the game."
-                .to_string(),
-        );
+pub async fn create_offline_account(state: State<'_, AppState>) -> Result<Account, String> {
+    // Hard gate, no bypass. Offline accounts:
+    //  1. ANTI-PIRACY — require a signed-in Microsoft account that owns the game
+    //     (proof of ownership) to exist first. No Microsoft account => no offline
+    //     account, period. There is no override flag or env var.
+    //  2. ANTI-IMPERSONATION — the offline identity is ALWAYS your Microsoft
+    //     username (the active one), so offline mode can never be used to take
+    //     another player's name. There is no free-text username to supply.
+    // Net effect: an offline account is just the offline-playable form of your
+    // owned Microsoft identity, for LAN/singleplayer.
+    let username = {
+        let accounts = state.accounts.lock().unwrap();
+        accounts
+            .iter()
+            .filter(|a| a.account_type == AccountType::Microsoft)
+            .max_by_key(|a| a.last_used)
+            .map(|a| a.username.clone())
     }
+    .ok_or_else(|| {
+        "Sign in with a Microsoft account that owns Minecraft before adding an offline account. \
+         Offline mode is for playing your owned copy on LAN/singleplayer — not for playing without owning the game."
+            .to_string()
+    })?;
+
+    validate_username(&username)?;
 
     let account = Account {
         id: Uuid::new_v4(),

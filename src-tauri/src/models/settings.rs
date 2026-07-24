@@ -29,15 +29,6 @@ pub struct GlobalSettings {
     // files (written before this field) still load.
     #[serde(default = "default_msa_client_id")]
     pub msa_client_id: String,
-    // Anti-piracy gate: offline accounts can only be created once a Microsoft
-    // account that owns the game is on file — so offline mode means "play your
-    // owned copy on LAN/singleplayer," never "play without buying it" (this is
-    // what keeps the launcher from being usable like TLauncher). This flag is a
-    // developer escape hatch for local testing before the Azure app is approved:
-    // it is deliberately NOT exposed in the Settings UI (no one-click bypass);
-    // a developer flips it by editing settings.json by hand. Default false.
-    #[serde(default)]
-    pub allow_offline_without_msa: bool,
 }
 
 pub fn default_msa_client_id() -> String {
@@ -60,7 +51,6 @@ impl Default for GlobalSettings {
             instance_storage_path: String::new(), // resolved at runtime via `directories`
             update_check_frequency_minutes: 60,
             msa_client_id: default_msa_client_id(),
-            allow_offline_without_msa: false,
         }
     }
 }
