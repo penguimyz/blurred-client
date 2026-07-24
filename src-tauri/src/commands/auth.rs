@@ -13,7 +13,7 @@ use md5::{Digest, Md5};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::models::account::Account;
+use crate::models::account::{Account, AccountType};
 use crate::state::AppState;
 
 /// Vanilla Minecraft assigns offline players a UUID via
@@ -53,6 +53,28 @@ pub async fn create_offline_account(
 ) -> Result<Account, String> {
     let username = username.trim().to_string();
     validate_username(&username)?;
+
+    // Anti-piracy gate (see GlobalSettings::allow_offline_without_msa): offline
+    // accounts require at least one Microsoft account that owns the game to be on
+    // file first. This is what keeps offline mode from being a TLauncher-style
+    // "play without owning it" path — it's only for playing an owned copy on
+    // LAN/singleplayer. The dev override (settings flag or env var) exists so the
+    // app is testable locally before the Azure app is approved.
+    let has_microsoft = state
+        .accounts
+        .lock()
+        .unwrap()
+        .iter()
+        .any(|a| a.account_type == AccountType::Microsoft);
+    let dev_override = state.settings.lock().unwrap().allow_offline_without_msa
+        || std::env::var("BLURRED_DEV_ALLOW_OFFLINE").is_ok();
+    if !has_microsoft && !dev_override {
+        return Err(
+            "Sign in with a Microsoft account that owns Minecraft before adding an offline account. \
+             Offline mode is for playing your owned copy on LAN/singleplayer — not for playing without owning the game."
+                .to_string(),
+        );
+    }
 
     let account = Account {
         id: Uuid::new_v4(),

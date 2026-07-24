@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAccountStore } from "../store/accountStore";
+import { useSettingsStore } from "../store/settingsStore";
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
 import { MicrosoftLoginButton } from "../components/MicrosoftLoginButton";
@@ -67,6 +68,7 @@ function AccountCard({ account, active, onActivate, onRemove }: { account: Accou
 
 export function Accounts() {
   const { accounts, refresh, remove, setActive } = useAccountStore();
+  const settings = useSettingsStore((s) => s.settings);
   const [adding, setAdding] = useState(false);
   const [offlineName, setOfflineName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -77,6 +79,10 @@ export function Accounts() {
 
   const activeId = [...accounts].sort((a, b) => (b.lastUsed ?? "").localeCompare(a.lastUsed ?? ""))[0]?.id;
   const offlineValid = /^[A-Za-z0-9_]{3,16}$/.test(offlineName.trim());
+  // Offline accounts require a Microsoft account (proof of ownership) on file —
+  // the anti-piracy gate, mirrored from the backend. Dev override unlocks it too.
+  const offlineAllowed =
+    accounts.some((a) => a.accountType === "microsoft") || (settings?.allowOfflineWithoutMsa ?? false);
 
   async function addOffline() {
     setError(null);
@@ -120,18 +126,25 @@ export function Accounts() {
             <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>OR OFFLINE</span>
             <div style={{ flex: 1, height: 1, background: "var(--glass-border)" }} />
           </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={offlineName}
-              onChange={(e) => setOfflineName(e.target.value)}
-              placeholder="Offline username"
-              spellCheck={false}
-              style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 13 }}
-            />
-            <button className="accent" onClick={addOffline} disabled={!offlineValid} style={{ opacity: offlineValid ? 1 : 0.5 }}>
-              Add
-            </button>
-          </div>
+          {offlineAllowed ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                value={offlineName}
+                onChange={(e) => setOfflineName(e.target.value)}
+                placeholder="Offline username"
+                spellCheck={false}
+                style={{ flex: 1, padding: "8px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 13 }}
+              />
+              <button className="accent" onClick={addOffline} disabled={!offlineValid} style={{ opacity: offlineValid ? 1 : 0.5 }}>
+                Add
+              </button>
+            </div>
+          ) : (
+            <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: 0 }}>
+              Add a Microsoft account that owns Minecraft first — then you can create
+              offline accounts for LAN/singleplayer.
+            </p>
+          )}
           <button onClick={() => setAdding(false)} style={{ ...ghostBtn, marginTop: 12 }}>
             Cancel
           </button>

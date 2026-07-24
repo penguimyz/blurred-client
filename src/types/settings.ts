@@ -14,4 +14,8 @@ export interface GlobalSettings {
   instanceStoragePath: string;
   updateCheckFrequencyMinutes: number;
   msaClientId: string; // Azure app (client) ID for Microsoft sign-in
+  // Dev-only escape hatch for the offline anti-piracy gate. Not shown in the
+  // Settings UI (edited by hand in settings.json); default false. See the Rust
+  // GlobalSettings field of the same name.
+  allowOfflineWithoutMsa: boolean;
 }
