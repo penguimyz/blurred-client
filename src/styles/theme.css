@@ -1,0 +1,223 @@
+/*
+  Glass theme tokens. Every component (GlassCard, DataTable, MonoField,
+  everything else) should read from these vars, never hardcode a blur
+  radius or border color directly -- that's how the Lunar surface layer
+  and the Prism depth layer stay visually one product while differing in
+  density (see Section 2.1 of the spec).
+
+  Note on backdrop-filter reliability: this has historically been the
+  weakest on Windows/WebView2 for compositing performance. If you see
+  stutter on instance-switch or panel-open animations once this is
+  running for real, the fallback is --glass-blur: none with a slightly
+  higher --glass-bg opacity to compensate visually.
+*/
+
+:root,
+[data-theme="dark"] {
+  --glass-bg: rgba(24, 24, 30, 0.55);
+  --glass-bg-elevated: rgba(32, 32, 40, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: 20px;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+
+  --text-primary: rgba(255, 255, 255, 0.92);
+  --text-secondary: rgba(255, 255, 255, 0.6);
+  --text-tertiary: rgba(255, 255, 255, 0.38);
+
+  --accent: #7c9cff; /* user-tintable at runtime, see setAccentColor() */
+  --accent-fg: #0b0d1a;
+
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+
+  --backdrop-gradient: radial-gradient(
+    circle at 20% 20%,
+    #2a2440,
+    #14141c 60%
+  );
+}
+
+[data-theme="light"] {
+  --glass-bg: rgba(255, 255, 255, 0.55);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.75);
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-blur: 20px;
+  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+
+  --text-primary: rgba(20, 20, 24, 0.92);
+  --text-secondary: rgba(20, 20, 24, 0.6);
+  --text-tertiary: rgba(20, 20, 24, 0.38);
+
+  --accent: #4c6fff;
+  --accent-fg: #ffffff;
+
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+
+  --backdrop-gradient: radial-gradient(
+    circle at 20% 20%,
+    #f0f0ff,
+    #e4e4f0 60%
+  );
+}
+
+/* Radius scale, per spec 12-20px range */
+:root {
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  background: var(--backdrop-gradient);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* custom titlebar app, no native chrome scroll */
+}
+
+/* Surface layer: the glossy, big-card, minimal-text component. */
+.glass-card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-shadow);
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 220ms ease;
+}
+
+.glass-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Depth layer: dense, technical, monospace-for-exact-values screens. */
+.data-table {
+  background: var(--glass-bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 6px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.mono-field {
+  font-family: var(--font-mono);
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+button.accent {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 150ms ease;
+}
+
+button.accent:hover {
+  filter: brightness(1.08);
+}
+
+button.accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/*
+  Dynamic backdrop (spec §2.2): soft, slowly-drifting color blobs behind the
+  glass, iOS-Control-Center style. The surface layer (Home) sits on the full
+  animation; it's the same gradient tokens as --backdrop-gradient so light/dark
+  stay consistent. Honors prefers-reduced-motion by holding still.
+*/
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--backdrop-gradient);
+}
+
+.backdrop-blob {
+  position: absolute;
+  width: 55vw;
+  height: 55vw;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.5;
+  will-change: transform;
+}
+
+.backdrop-blob.b1 {
+  top: -15%;
+  left: -10%;
+  background: var(--accent);
+  opacity: 0.28;
+  animation: drift1 26s ease-in-out infinite alternate;
+}
+
+.backdrop-blob.b2 {
+  bottom: -20%;
+  right: -10%;
+  background: #a855f7;
+  opacity: 0.22;
+  animation: drift2 32s ease-in-out infinite alternate;
+}
+
+.backdrop-blob.b3 {
+  top: 30%;
+  right: 20%;
+  width: 35vw;
+  height: 35vw;
+  background: #22d3ee;
+  opacity: 0.16;
+  animation: drift3 38s ease-in-out infinite alternate;
+}
+
+@keyframes drift1 {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(12vw, 8vh) scale(1.15); }
+}
+@keyframes drift2 {
+  from { transform: translate(0, 0) scale(1.1); }
+  to { transform: translate(-10vw, -6vh) scale(1); }
+}
+@keyframes drift3 {
+  from { transform: translate(0, 0); }
+  to { transform: translate(-8vw, 10vh); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop-blob {
+    animation: none !important;
+  }
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/Cargo.lock
+*.log
+.DS_Store
+Thumbs.db
+
+# If you add a local CurseForge API key config per curseforge.rs's TODO,
+# make sure whatever file you put it in is listed here too.

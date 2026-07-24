@@ -1,0 +1,42 @@
+[package]
+name = "blurred-client"
+version = "0.1.0"
+description = "A Minecraft launcher with Lunar-grade polish and Prism-grade control."
+authors = ["you"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "blurred_client_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+directories = "5"
+thiserror = "1"
+anyhow = "1"
+sha1 = "0.10"
+md-5 = "0.10"
+futures-util = "0.3"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+window-vibrancy = "0.5"
+keyring = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"
+
+[features]
+# this feature is used for production builds or when `devPath` points to the filesystem
+# DO NOT REMOVE!!
+custom-protocol = ["tauri/custom-protocol"]

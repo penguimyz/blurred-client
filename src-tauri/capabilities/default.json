@@ -1,0 +1,9 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for the main window: core APIs plus shell:open, needed by the login gate to open the Microsoft device-code verification URL in the user's default browser.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:allow-open"
+  ]
+}

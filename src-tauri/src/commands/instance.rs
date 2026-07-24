@@ -1,0 +1,339 @@
+use std::path::{Path, PathBuf};
+
+use tauri::{AppHandle, Emitter, State};
+use uuid::Uuid;
+
+use crate::commands::java::{build_classpath, detect_installed_javas, launch_and_stream, DetectedJava};
+use crate::commands::mojang::{
+    download_if_missing, fetch_version_detail, fetch_version_manifest, library_applies_to_current_os,
+};
+use crate::models::account::AccountType;
+use crate::models::instance::{Instance, Loader};
+use crate::state::AppState;
+
+fn instance_json_path(base: &Path) -> PathBuf {
+    base.join("instance.json")
+}
+
+pub fn load_instance(dir: &Path) -> anyhow::Result<Instance> {
+    let raw = std::fs::read_to_string(instance_json_path(dir))?;
+    Ok(serde_json::from_str(&raw)?)
+}
+
+pub fn save_instance(dir: &Path, instance: &Instance) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(instance_json_path(dir), serde_json::to_string_pretty(instance)?)?;
+    Ok(())
+}
+
+/// Locate an instance's on-disk directory and its parsed model by id.
+/// Every command that mutates one instance funnels through this instead of
+/// re-walking `instances_dir` by hand, so the "folder name can drift from the
+/// display name" lookup rule lives in exactly one place.
+pub fn find_instance(state: &AppState, instance_id: &str) -> Result<(PathBuf, Instance), String> {
+    let target = Uuid::parse_str(instance_id).map_err(|e| e.to_string())?;
+    let entries = std::fs::read_dir(&state.instances_dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if let Ok(inst) = load_instance(&dir) {
+            if inst.id == target {
+                return Ok((dir, inst));
+            }
+        }
+    }
+    Err(format!("instance {instance_id} not found"))
+}
+
+#[tauri::command]
+pub async fn list_instances(state: State<'_, AppState>) -> Result<Vec<Instance>, String> {
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(&state.instances_dir).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if dir.is_dir() {
+            if let Ok(inst) = load_instance(&dir) {
+                out.push(inst);
+            }
+        }
+    }
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(out)
+}
+
+/// Loader is currently accepted but only "vanilla" actually launches --
+/// Fabric/Forge/Quilt/NeoForge installer integration is Phase 3+ work per
+/// the roadmap and isn't wired in yet. Non-vanilla instances will be
+/// created (so you can build the UI against them) but will fail at launch
+/// with a clear "not implemented" error rather than silently doing the
+/// wrong thing.
+#[tauri::command]
+pub async fn create_instance(
+    state: State<'_, AppState>,
+    name: String,
+    mc_version: String,
+    loader: Loader,
+) -> Result<Instance, String> {
+    let instance = Instance::new(name, mc_version, loader);
+    let dir = state.instances_dir.join(instance.folder_name());
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+    Ok(instance)
+}
+
+#[tauri::command]
+pub async fn delete_instance(state: State<'_, AppState>, instance_id: String) -> Result<(), String> {
+    let (dir, _) = find_instance(&state, &instance_id)?;
+    std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_instance(state: State<'_, AppState>, instance_id: String) -> Result<Instance, String> {
+    let (_, inst) = find_instance(&state, &instance_id)?;
+    Ok(inst)
+}
+
+/// Persist an edited instance model back to its `instance.json`. The frontend
+/// sends the whole `Instance` (Notes tab, per-instance Settings overrides,
+/// window size, loader version) and this writes it verbatim. The on-disk
+/// folder is located by `id`, so renaming the instance never moves its
+/// directory — the folder name is cosmetic once the instance exists.
+#[tauri::command]
+pub async fn update_instance(
+    state: State<'_, AppState>,
+    instance: Instance,
+) -> Result<Instance, String> {
+    let (dir, _) = find_instance(&state, &instance.id.to_string())?;
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+    Ok(instance)
+}
+
+#[tauri::command]
+pub fn list_detected_java() -> Vec<DetectedJava> {
+    detect_installed_javas()
+}
+
+/// The Phase 1 core loop: resolve version manifest -> download client jar +
+/// applicable libraries -> spawn java -> stream logs back to the frontend
+/// via `instance-log` events.
+///
+/// NOTE ON WHAT'S MISSING: asset download/verification is not implemented
+/// yet (game will likely fail to find sounds/textures on first real launch
+/// until that lands), and only vanilla loader is handled. This gets you
+/// far enough to prove the pipeline; asset syncing and mod loader
+/// installers are next.
+#[tauri::command]
+pub async fn launch_instance(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    instance_id: String,
+) -> Result<(), String> {
+    let (dir, mut instance) = find_instance(&state, &instance_id)?;
+
+    if instance.loader != Loader::Vanilla {
+        return Err(format!(
+            "{:?} loader installers aren't wired up yet -- vanilla only for now",
+            instance.loader
+        ));
+    }
+
+    let http = reqwest::Client::new();
+
+    let manifest = fetch_version_manifest(&http).await.map_err(|e| e.to_string())?;
+    let version_summary = manifest
+        .versions
+        .iter()
+        .find(|v| v.id == instance.mc_version)
+        .ok_or_else(|| format!("version {} not found in manifest", instance.mc_version))?;
+
+    let detail = fetch_version_detail(&http, &version_summary.url)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let versions_dir = dir.join("versions").join(&instance.mc_version);
+    let client_jar = versions_dir.join(format!("{}.jar", instance.mc_version));
+    download_if_missing(
+        &http,
+        &detail.downloads.client.url,
+        &client_jar,
+        detail.downloads.client.size,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let libraries_dir = state.data_dir.join("libraries");
+    let mut classpath_jars = vec![client_jar];
+    for lib in &detail.libraries {
+        if !library_applies_to_current_os(lib) {
+            continue;
+        }
+        let Some(downloads) = &lib.downloads else { continue };
+        let Some(artifact) = &downloads.artifact else { continue };
+        let jar_path = libraries_dir.join(maven_coord_to_path(&lib.name));
+        download_if_missing(&http, &artifact.url, &jar_path, artifact.size)
+            .await
+            .map_err(|e| e.to_string())?;
+        classpath_jars.push(jar_path);
+    }
+
+    let classpath = build_classpath(&classpath_jars);
+
+    // Asset sync (sounds/textures). Streamed to the instance log so the user can
+    // see progress instead of staring at a frozen launch. A failure here is
+    // surfaced but not fatal — the game may still start (just without some
+    // assets), and the error tells the user exactly what to retry.
+    let assets_dir = state.data_dir.join("assets");
+    let log = |stream: &str, line: String| {
+        let _ = app.emit(
+            "instance-log",
+            serde_json::json!({ "instanceId": instance_id.clone(), "stream": stream, "line": line }),
+        );
+    };
+    log("stdout", format!("[blurred] Syncing assets (index {})…", detail.asset_index.id));
+    match crate::commands::mojang::sync_assets(
+        &http,
+        &assets_dir,
+        &detail.asset_index.id,
+        &detail.asset_index.url,
+    )
+    .await
+    {
+        Ok(n) => log("stdout", format!("[blurred] Assets ready ({n} objects).")),
+        Err(e) => log("stderr", format!("[blurred] Asset sync failed: {e}")),
+    }
+
+    let settings = state.settings.lock().unwrap().clone();
+    let java = if instance.java_override.enabled {
+        instance.java_override.value.clone()
+    } else {
+        settings.default_java.clone()
+    };
+
+    let java_exe = java.executable_path.clone().ok_or_else(|| {
+        "no Java executable configured -- run java detection and set one in Settings".to_string()
+    })?;
+
+    let mut jvm_args = vec![
+        format!("-Xms{}M", java.min_memory_mb),
+        format!("-Xmx{}M", java.max_memory_mb),
+        "-cp".to_string(),
+        classpath,
+    ];
+    if !java.jvm_args.trim().is_empty() {
+        jvm_args.extend(java.jvm_args.split_whitespace().map(String::from));
+    }
+
+    // Offline identity: pick the most recently used account (there's no
+    // per-instance account assignment UI yet, so "the active account" is just
+    // whichever was last touched). Its username + derived offline UUID go
+    // straight into the game args. Offline mode uses a dummy access token and
+    // userType "legacy" -- there's no real session to authenticate against.
+    let account = {
+        let accounts = state.accounts.lock().unwrap();
+        accounts
+            .iter()
+            .max_by_key(|a| a.last_used)
+            .cloned()
+            .ok_or_else(|| "no account configured -- add one from the sign-in screen first".to_string())?
+    };
+
+    // Resolve the launch identity. Offline accounts use dummy token/legacy
+    // userType; Microsoft accounts re-derive a live Minecraft token from the
+    // keychain-stored refresh token (network round-trip, so it's logged).
+    let (mc_username, mc_uuid, mc_access_token, user_type) = match account.account_type {
+        AccountType::Microsoft => {
+            log("stdout", "[blurred] Authenticating with Microsoft…".to_string());
+            let creds = crate::commands::online_auth::authenticate_for_launch(
+                &settings.msa_client_id,
+                &account,
+            )
+            .await
+            .map_err(|e| {
+                log("stderr", format!("[blurred] Microsoft auth failed: {e}"));
+                e
+            })?;
+            log("stdout", format!("[blurred] Signed in as {}.", creds.username));
+            (creds.username, creds.uuid, creds.access_token, "msa")
+        }
+        AccountType::Offline => (
+            account.username.clone(),
+            account.mc_uuid.replace('-', ""), // --uuid wants undashed 32-char hex
+            "0".to_string(),
+            "legacy",
+        ),
+    };
+
+    let game_args = vec![
+        "--username".to_string(),
+        mc_username,
+        "--version".to_string(),
+        instance.mc_version.clone(),
+        "--gameDir".to_string(),
+        dir.to_string_lossy().to_string(),
+        "--assetsDir".to_string(),
+        state.data_dir.join("assets").to_string_lossy().to_string(),
+        "--assetIndex".to_string(),
+        detail.asset_index.id.clone(),
+        "--uuid".to_string(),
+        mc_uuid,
+        "--accessToken".to_string(),
+        mc_access_token,
+        "--userType".to_string(),
+        user_type.to_string(),
+    ];
+
+    let env_vars = if instance.env_vars_override.enabled {
+        instance.env_vars_override.value.vars.clone()
+    } else {
+        settings.default_env_vars.vars.clone()
+    };
+
+    instance.last_played = Some(chrono::Utc::now());
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+
+    // Mark this account as the most recently used so it stays "active".
+    {
+        let mut accounts = state.accounts.lock().unwrap();
+        if let Some(a) = accounts.iter_mut().find(|a| a.id == account.id) {
+            a.last_used = Some(chrono::Utc::now());
+        }
+        let accounts_clone = accounts.clone();
+        drop(accounts);
+        crate::state::persist_accounts(&state.data_dir, &accounts_clone).map_err(|e| e.to_string())?;
+    }
+
+    let launch_start = std::time::Instant::now();
+    let exit_code = launch_and_stream(
+        app,
+        instance_id.clone(),
+        java_exe,
+        jvm_args,
+        detail.main_class,
+        game_args,
+        dir.clone(),
+        env_vars,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let elapsed = launch_start.elapsed().as_secs();
+    instance.total_playtime_seconds += elapsed;
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+
+    if exit_code != 0 {
+        return Err(format!("minecraft exited with code {exit_code}"));
+    }
+    Ok(())
+}
+
+/// "com.google.code.gson:gson:2.10.1" -> "com/google/code/gson/gson/2.10.1/gson-2.10.1.jar"
+fn maven_coord_to_path(coord: &str) -> PathBuf {
+    let parts: Vec<&str> = coord.split(':').collect();
+    if parts.len() < 3 {
+        return PathBuf::from(coord.replace(':', "_"));
+    }
+    let (group, artifact, version) = (parts[0], parts[1], parts[2]);
+    let group_path = group.replace('.', "/");
+    PathBuf::from(format!(
+        "{group_path}/{artifact}/{version}/{artifact}-{version}.jar"
+    ))
+}
