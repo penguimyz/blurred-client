@@ -1,38 +1,54 @@
 # Blurred Client
 
-See `SPEC.md` for the full product spec and `ROADMAP.md` for what's
-actually built vs. what's still TODO — read the roadmap before assuming
-any given feature works, this is an early scaffold, not a finished app.
+Blurred Client is a **personal, non-commercial, open-source third-party
+Minecraft: Java Edition launcher** — a desktop app for creating and managing
+isolated game instances (Minecraft version, mod loader, mods, configs, saves)
+and launching the copy of the game the signed-in player owns. It's built with
+[Tauri](https://tauri.app) (Rust backend) + React, with a frosted-glass UI.
 
-## Sign-in: Microsoft or offline
+> **Not affiliated with, endorsed by, or associated with Mojang, Microsoft, or
+> Xbox.** "Minecraft" is a trademark of Mojang Synergies AB. This is a hobby
+> project in active development. See `SPEC.md` for the product spec and
+> `ROADMAP.md` for what's built vs. still TODO.
 
-The login gate offers two paths:
+## Authentication & compliance
 
-**Microsoft/Xbox sign-in** (`src-tauri/src/commands/online_auth.rs`) — the
-OAuth 2.0 device-code flow: the app shows a short code, opens
-microsoft.com/link, and completes the MSA → Xbox Live → XSTS → Minecraft
-Services chain once you approve. These accounts can join online servers and
-Realms. The long-lived refresh token is stored in the **OS keychain** (via the
-`keyring` crate); the short-lived Minecraft access token is re-derived at launch
-and never written to disk.
+Blurred Client signs players in with **their own Microsoft account** using the
+**standard, documented OAuth 2.0 device-code flow**. It does **not** bypass,
+disable, weaken, or work around any authentication, license-ownership, or safety
+check, and it never handles or stores user passwords. Game ownership is enforced
+by Minecraft Services — if the account doesn't own Minecraft: Java Edition, there
+is no profile and the launch is refused.
 
-- Needs an **Azure app registration** (client ID). One is seeded by default in
-  Settings → Microsoft sign-in; point it at your own Azure app if you like. The
-  app must have **"Allow public client flows"** enabled (Authentication →
-  Advanced settings) for the device-code grant.
-- Caveat: Microsoft has at times gated the final `login_with_xbox` step to
-  approved Azure apps. A 401/403 there with an otherwise-valid token means the
-  app needs Microsoft/Mojang launcher-auth approval.
-- This chain is written against the documented endpoints but has **not** been
-  live-tested from the machine it was built on (no network to the auth hosts).
+Sign-in flow (`src-tauri/src/commands/online_auth.rs`):
 
-**Offline mode** — type an in-game username and it mints a local account. The
-username maps to a stable "offline UUID" the same way vanilla does
+1. **OAuth 2.0 device code** against `login.microsoftonline.com` (`consumers`
+   tenant, scope `XboxLive.signin offline_access`) — the user approves at
+   microsoft.com/link. Public client, **no client secret**.
+2. **Xbox Live → XSTS →** `api.minecraftservices.com/authentication/login_with_xbox`.
+3. `api.minecraftservices.com/minecraft/profile` to read the owned account's
+   profile (uuid / name / skin).
+
+Token handling:
+
+- The long-lived **MSA refresh token is stored in the OS keychain** (via the
+  `keyring` crate), keyed by account id — never in plaintext.
+- The short-lived Minecraft access token is re-derived from the refresh token at
+  launch and **never written to disk**.
+
+The Azure **application (client) ID** used for sign-in is a configurable setting
+(Settings → Microsoft sign-in); the Azure app has "Allow public client flows"
+enabled for the device-code grant. The launcher respects the
+[Minecraft EULA and Usage Guidelines](https://aka.ms/mcusageguidelines).
+
+**Offline mode** is also offered for LAN / singleplayer: it mints a local account
+with the same deterministic offline UUID vanilla uses
 (`UUID.nameUUIDFromBytes("OfflinePlayer:<name>")` — see `offline_uuid` in
 `src-tauri/src/commands/auth.rs`). Offline accounts can only join
-`online-mode=false` servers — fine for testing, singleplayer, and LAN.
+`online-mode=false` servers; they do not and cannot reach online servers, Realms,
+or any authenticated Mojang service.
 
-Manage, switch, add, and remove accounts of either type from the **Accounts**
+Accounts of either type are managed (add / switch / remove) from the **Accounts**
 tab.
 
 ## Windows setup (this is the target platform for now)
@@ -63,8 +79,9 @@ tab.
 - A data directory gets created (via the `directories` crate — on Windows
   that's `%APPDATA%\blurredclient\BlurredClient\`), containing
   `settings.json` and an `instances/` folder.
-- The sign-in gate asks for a username (offline mode) and creates a local
-  account in `accounts.json`.
+- The sign-in gate offers Microsoft sign-in or offline mode, and saves the
+  account to `accounts.json` (Microsoft refresh tokens go to the OS keychain,
+  not this file).
 - The Home screen loads (empty instance grid) and lets you create a
   vanilla instance.
 - Hitting "Play" attempts the full Phase 1 pipeline: fetch Mojang's
@@ -98,14 +115,18 @@ generates the full platform icon set automatically.
 
 ```
 src-tauri/          Rust backend
-  src/commands/      One file per command group (instance, java, mojang, modrinth, curseforge)
-  src/models/        Instance + settings data structures
-  src/state.rs        App-wide state (data dir, settings, instance cache)
+  src/commands/      One file per command group: instance, java, mojang, modrinth,
+                     mods, config, content, modpacks, settings, auth, online_auth
+  src/models/        Instance / settings / account / modpack data structures
+  src/state.rs       App-wide state (data dir, settings, accounts, instance cache)
+  src/util.rs        Small shared helpers (base64)
 src/                 React frontend
-  components/        GlassCard (surface layer), Sidebar
-  pages/              Home (only real page right now)
-  store/              Zustand store wrapping the Tauri commands
-  lib/tauri.ts        Typed invoke() wrappers -- one function per Rust command
-  types/instance.ts   Hand-maintained mirror of the Rust structs (no codegen yet)
-  styles/theme.css     Glass design tokens -- read ROADMAP.md Phase 2 before adding new components
+  components/        Shared UI: GlassCard, DataTable, MonoField, OverrideSettingsForm,
+                     Backdrop, Sidebar, LoginGate, MicrosoftLoginButton
+  pages/             Home, Browse, Modpacks, Accounts, Settings, GlobalLogs
+  pages/instance/    Per-instance detail tabs (Overview/Mods/Configs/Worlds/…)
+  store/             Zustand stores wrapping the Tauri commands
+  lib/tauri.ts       Typed invoke() wrappers -- one function per Rust command
+  types/             Hand-maintained mirrors of the Rust structs (no codegen yet)
+  styles/theme.css   Glass design tokens
 ```
