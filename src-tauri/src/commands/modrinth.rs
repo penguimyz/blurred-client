@@ -101,6 +101,10 @@ pub async fn modrinth_search(
 #[derive(Debug, Clone, Deserialize)]
 pub struct ModrinthVersion {
     pub id: String,
+    /// The real project id — the canonical identity used for de-duplication, so a
+    /// project requested by slug and again as a dependency (by id) is one install.
+    #[serde(default)]
+    pub project_id: String,
     pub name: String,
     pub version_number: String,
     #[serde(default)]
@@ -190,13 +194,16 @@ async fn resolve_and_download(
     with_dependencies: bool,
     visited: &mut HashSet<String>,
 ) -> Result<(), String> {
+    // `fetched` guards against re-fetching the same alias (slug/id) within this
+    // walk; `visited` (shared across calls) tracks canonical project ids that are
+    // already installed, so nothing is installed twice under two names.
+    let mut fetched: HashSet<String> = HashSet::new();
     let mut queue: Vec<(String, Option<String>)> = vec![(start_project, start_version)];
 
     while let Some((pid, vid)) = queue.pop() {
-        if visited.contains(&pid) {
+        if !fetched.insert(pid.clone()) {
             continue;
         }
-        visited.insert(pid.clone());
 
         let versions = fetch_project_versions(client, &pid, mc, loader).await?;
         let version = match vid {
@@ -205,25 +212,37 @@ async fn resolve_and_download(
         }
         .ok_or_else(|| format!("no {mc} / {loader:?} version available for project {pid}"))?;
 
+        // Canonical identity, regardless of whether we were asked by slug or id.
+        let canonical = if version.project_id.is_empty() {
+            pid.clone()
+        } else {
+            version.project_id.clone()
+        };
+        // Already installed under some name (seed or an earlier alias)? Skip —
+        // this is what stops the duplicate-mod crash (e.g. ukulib via slug + dep).
+        if !visited.insert(canonical.clone()) {
+            continue;
+        }
+
         let file = pick_file(&version)
             .ok_or_else(|| format!("project {pid} version has no downloadable file"))?
             .clone();
 
         // Drop any prior tracked copy of this project (and its old jar) first.
-        if let Some(old) = instance.mods.iter().find(|m| m.id == pid).map(|m| m.filename.clone()) {
+        if let Some(old) = instance.mods.iter().find(|m| m.id == canonical).map(|m| m.filename.clone()) {
             if old != file.filename {
                 let _ = std::fs::remove_file(mods_dir.join(&old));
                 let _ = std::fs::remove_file(mods_dir.join(format!("{old}.disabled")));
             }
         }
-        instance.mods.retain(|m| m.id != pid);
+        instance.mods.retain(|m| m.id != canonical);
 
         download_if_missing(client, &file.url, &mods_dir.join(&file.filename), file.size)
             .await
             .map_err(|e| e.to_string())?;
 
         instance.mods.push(ModRef {
-            id: pid.clone(),
+            id: canonical.clone(),
             filename: file.filename.clone(),
             name: version.name.clone(),
             version: version.version_number.clone(),
