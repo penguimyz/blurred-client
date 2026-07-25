@@ -191,6 +191,7 @@ pub async fn launch_and_stream(
     game_args: Vec<String>,
     working_dir: PathBuf,
     env_vars: Vec<(String, String)>,
+    kill_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<i32> {
     let mut cmd = Command::new(&java_path);
     cmd.args(&jvm_args)
@@ -230,7 +231,17 @@ pub async fn launch_and_stream(
         }
     });
 
-    let status = child.wait().await?;
+    // Wait for the game to exit on its own, OR for a quit request to arrive on
+    // `kill_rx` (the Quit button) — whichever comes first. On quit we ask the
+    // process to terminate and still wait for it so we return a real exit code
+    // and don't leave a zombie.
+    let status = tokio::select! {
+        res = child.wait() => res?,
+        _ = kill_rx => {
+            let _ = child.start_kill();
+            child.wait().await?
+        }
+    };
     Ok(status.code().unwrap_or(-1))
 }
 

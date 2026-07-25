@@ -220,7 +220,7 @@ pub async fn reveal_path(path: String) -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn open_in_file_manager(dir: &Path) -> Result<(), String> {
+pub fn open_in_file_manager(dir: &Path) -> Result<(), String> {
     std::process::Command::new("explorer")
         .arg(dir)
         .spawn()
@@ -229,11 +229,11 @@ fn open_in_file_manager(dir: &Path) -> Result<(), String> {
 }
 
 #[cfg(target_os = "macos")]
-fn open_in_file_manager(dir: &Path) -> Result<(), String> {
+pub fn open_in_file_manager(dir: &Path) -> Result<(), String> {
     std::process::Command::new("open").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-fn open_in_file_manager(dir: &Path) -> Result<(), String> {
+pub fn open_in_file_manager(dir: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { Instance } from "../../types/instance";
-import { getInstance, launchInstance } from "../../lib/tauri";
+import { getInstance } from "../../lib/tauri";
+import { useInstanceStore } from "../../store/instanceStore";
 import { OverviewTab } from "./OverviewTab";
 import { ModsTab } from "./ModsTab";
 import { ConfigsTab } from "./ConfigsTab";
@@ -36,10 +37,13 @@ export function InstanceDetail({ instanceId, onBack }: { instanceId: string; onB
   const [instance, setInstance] = useState<Instance | null>(null);
   const [tab, setTab] = useState("overview");
   const [error, setError] = useState<string | null>(null);
+  const { running, launch, quit, refreshRunning } = useInstanceStore();
+  const isRunning = !!running[instanceId];
 
   useEffect(() => {
     getInstance(instanceId).then(setInstance).catch((e) => setError(String(e)));
-  }, [instanceId]);
+    refreshRunning();
+  }, [instanceId, refreshRunning]);
 
   if (error) {
     return (
@@ -70,13 +74,22 @@ export function InstanceDetail({ instanceId, onBack }: { instanceId: string; onB
               {instance.mcVersion} · {instance.loader}
             </div>
           </div>
-          <button
-            className="accent"
-            style={{ padding: "10px 28px", fontSize: 14 }}
-            onClick={() => launchInstance(instance.id).catch((e) => setError(String(e)))}
-          >
-            ▶ Play
-          </button>
+          {isRunning ? (
+            <button
+              style={{ padding: "10px 28px", fontSize: 14, background: "var(--danger)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", fontWeight: 600, cursor: "pointer" }}
+              onClick={() => quit(instance.id).catch((e) => setError(String(e)))}
+            >
+              ■ Quit
+            </button>
+          ) : (
+            <button
+              className="accent"
+              style={{ padding: "10px 28px", fontSize: 14 }}
+              onClick={() => launch(instance.id).catch((e) => setError(String(e)))}
+            >
+              ▶ Play
+            </button>
+          )}
         </div>
 
         {/* Secondary tab bar */}

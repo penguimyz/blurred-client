@@ -37,6 +37,28 @@ export function launchInstance(instanceId: string): Promise<void> {
   return invoke("launch_instance", { instanceId });
 }
 
+/** Stop a running instance's game process. */
+export function killInstance(instanceId: string): Promise<void> {
+  return invoke("kill_instance", { instanceId });
+}
+
+/** Instance ids with a currently-running game process. */
+export function listRunning(): Promise<string[]> {
+  return invoke("list_running");
+}
+
+export function renameInstance(instanceId: string, name: string): Promise<Instance> {
+  return invoke("rename_instance", { instanceId, name });
+}
+
+export function duplicateInstance(instanceId: string): Promise<Instance> {
+  return invoke("duplicate_instance", { instanceId });
+}
+
+export function openInstanceFolder(instanceId: string): Promise<void> {
+  return invoke("open_instance_folder", { instanceId });
+}
+
 export function getInstance(instanceId: string): Promise<Instance> {
   return invoke("get_instance", { instanceId });
 }

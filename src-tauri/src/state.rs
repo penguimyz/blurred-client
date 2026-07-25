@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
 use directories::ProjectDirs;
+use tokio::sync::oneshot;
 
 use crate::models::account::Account;
 use crate::models::settings::GlobalSettings;
@@ -12,6 +14,12 @@ pub struct AppState {
     pub instances_dir: PathBuf, // .../BlurredClient/instances/<folder_name>/
     pub settings: Mutex<GlobalSettings>,
     pub accounts: Mutex<Vec<Account>>,
+    /// Instance id -> a one-shot kill switch for its running game process.
+    /// `launch_instance` inserts one before spawning and removes it on exit;
+    /// `kill_instance` takes it out and fires it to stop the game. Presence in
+    /// this map is also how the frontend-facing "is it running" question is
+    /// answered (see `list_running`).
+    pub running: Mutex<HashMap<String, oneshot::Sender<()>>>,
 }
 
 impl AppState {
@@ -49,6 +57,7 @@ impl AppState {
             instances_dir,
             settings: Mutex::new(settings),
             accounts: Mutex::new(accounts),
+            running: Mutex::new(HashMap::new()),
         })
     }
 

@@ -112,6 +112,94 @@ pub fn list_detected_java() -> Vec<DetectedJava> {
     detect_installed_javas()
 }
 
+/// Stop a running instance's game process (the Quit button). Fires the kill
+/// switch registered by `launch_instance`; a no-op error if it isn't running.
+#[tauri::command]
+pub async fn kill_instance(state: State<'_, AppState>, instance_id: String) -> Result<(), String> {
+    let tx = state.running.lock().unwrap().remove(&instance_id);
+    match tx {
+        Some(tx) => {
+            let _ = tx.send(());
+            Ok(())
+        }
+        None => Err("instance is not running".to_string()),
+    }
+}
+
+/// Instance ids that currently have a running game process. Lets the UI show
+/// Quit vs. Play correctly even after a reload while a game is still open.
+#[tauri::command]
+pub async fn list_running(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    Ok(state.running.lock().unwrap().keys().cloned().collect())
+}
+
+/// Rename an instance (display name only — the on-disk folder never moves, since
+/// everything is keyed by id).
+#[tauri::command]
+pub async fn rename_instance(
+    state: State<'_, AppState>,
+    instance_id: String,
+    name: String,
+) -> Result<Instance, String> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err("instance name can't be empty".to_string());
+    }
+    let (dir, mut instance) = find_instance(&state, &instance_id)?;
+    instance.name = name;
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+    Ok(instance)
+}
+
+/// Duplicate an instance: deep-copy its folder (mods, configs, saves, downloaded
+/// files) into a new instance with a fresh id, reset play stats, and a "(copy)"
+/// name.
+#[tauri::command]
+pub async fn duplicate_instance(
+    state: State<'_, AppState>,
+    instance_id: String,
+) -> Result<Instance, String> {
+    let (src_dir, src) = find_instance(&state, &instance_id)?;
+
+    let mut copy = src.clone();
+    copy.id = Uuid::new_v4();
+    copy.name = format!("{} (copy)", src.name);
+    copy.created_at = chrono::Utc::now();
+    copy.last_played = None;
+    copy.total_playtime_seconds = 0;
+
+    let dest_dir = state.instances_dir.join(copy.folder_name());
+    copy_dir_recursive(&src_dir, &dest_dir).map_err(|e| e.to_string())?;
+    // Overwrite the copied instance.json with the new identity.
+    save_instance(&dest_dir, &copy).map_err(|e| e.to_string())?;
+    Ok(copy)
+}
+
+/// Open an instance's folder in the OS file manager.
+#[tauri::command]
+pub async fn open_instance_folder(
+    state: State<'_, AppState>,
+    instance_id: String,
+) -> Result<(), String> {
+    let (dir, _) = find_instance(&state, &instance_id)?;
+    crate::commands::modpacks::open_in_file_manager(&dir)
+}
+
+fn copy_dir_recursive(src: &Path, dest: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dest.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)?;
+        }
+    }
+    Ok(())
+}
+
 /// The Phase 1 core loop: resolve version manifest -> download client jar +
 /// applicable libraries -> spawn java -> stream logs back to the frontend
 /// via `instance-log` events.
@@ -301,8 +389,15 @@ pub async fn launch_instance(
         crate::state::persist_accounts(&state.data_dir, &accounts_clone).map_err(|e| e.to_string())?;
     }
 
+    // Register a kill switch so the Quit button can stop this process, then
+    // remove it once the process is gone (whether it exited on its own or was
+    // killed). Its presence in `state.running` is also how the UI knows the
+    // instance is running.
+    let (kill_tx, kill_rx) = tokio::sync::oneshot::channel();
+    state.running.lock().unwrap().insert(instance_id.clone(), kill_tx);
+
     let launch_start = std::time::Instant::now();
-    let exit_code = launch_and_stream(
+    let result = launch_and_stream(
         app,
         instance_id.clone(),
         java_exe,
@@ -311,9 +406,12 @@ pub async fn launch_instance(
         game_args,
         dir.clone(),
         env_vars,
+        kill_rx,
     )
-    .await
-    .map_err(|e| e.to_string())?;
+    .await;
+
+    state.running.lock().unwrap().remove(&instance_id);
+    let exit_code = result.map_err(|e| e.to_string())?;
 
     let elapsed = launch_start.elapsed().as_secs();
     instance.total_playtime_seconds += elapsed;
