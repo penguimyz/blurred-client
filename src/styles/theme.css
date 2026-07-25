@@ -154,6 +154,62 @@ button.accent:disabled {
 }
 
 /*
+  Custom window chrome (see components/TitleBar.tsx). Fixed 32px strip across
+  the top; the app content reserves this space. Transparent background so the
+  frosted backdrop shows through — the buttons only appear on hover.
+*/
+.titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 1000;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.titlebar-title {
+  padding-left: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  line-height: 32px;
+  flex: 1;
+}
+
+.titlebar-controls {
+  display: flex;
+  height: 100%;
+}
+
+.tb-btn {
+  width: 46px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.tb-btn:hover {
+  background: var(--glass-bg-elevated);
+  color: var(--text-primary);
+}
+
+.tb-close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/*
   Dynamic backdrop (spec §2.2): soft, slowly-drifting color blobs behind the
   glass, iOS-Control-Center style. The surface layer (Home) sits on the full
   animation; it's the same gradient tokens as --backdrop-gradient so light/dark

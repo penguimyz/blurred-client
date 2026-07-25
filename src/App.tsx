@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Backdrop } from "./components/Backdrop";
+import { TitleBar } from "./components/TitleBar";
 import { Home } from "./pages/Home";
 import { Browse } from "./pages/Browse";
 import { Modpacks } from "./pages/Modpacks";
@@ -32,27 +33,18 @@ export default function App() {
     setOpenInstance(null);
   }
 
-  // Per spec 8.1: don't render anything else until we know whether an account
+  // Per spec 8.1: don't render app content until we know whether an account
   // exists. `loaded` (not accounts.length) gates this so a returning signed-in
   // user doesn't see a flash of the login screen while listAccounts() is still
-  // in flight.
-  if (!loaded) {
-    return <Backdrop />;
-  }
-
-  if (accounts.length === 0) {
-    return (
-      <>
-        <Backdrop />
-        <LoginGate onSuccess={refresh} />
-      </>
-    );
-  }
-
-  return (
-    <>
-      <Backdrop />
-      <div style={{ display: "flex", height: "100vh" }}>
+  // in flight. The window chrome (Backdrop + TitleBar) always renders so the
+  // window is movable/closable even on the loading and login screens.
+  let content = null;
+  if (loaded && accounts.length === 0) {
+    content = <LoginGate onSuccess={refresh} />;
+  } else if (loaded) {
+    content = (
+      // paddingTop reserves the 32px title-bar strip so content isn't hidden under it.
+      <div style={{ display: "flex", height: "100vh", paddingTop: 32, boxSizing: "border-box" }}>
         <Sidebar active={active} onSelect={selectTab} />
         <div style={{ flex: 1, overflow: "hidden" }}>
           {openInstance ? (
@@ -69,6 +61,14 @@ export default function App() {
           )}
         </div>
       </div>
+    );
+  }
+
+  return (
+    <>
+      <Backdrop />
+      <TitleBar />
+      {content}
     </>
   );
 }
