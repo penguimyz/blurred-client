@@ -325,7 +325,14 @@ pub async fn launch_instance(
     Ok(())
 }
 
-/// "com.google.code.gson:gson:2.10.1" -> "com/google/code/gson/gson/2.10.1/gson-2.10.1.jar"
+/// Maven coordinate -> repo-relative jar path, including any classifier:
+///   "com.google.code.gson:gson:2.10.1"          -> "com/google/code/gson/gson/2.10.1/gson-2.10.1.jar"
+///   "org.lwjgl:lwjgl:3.3.3:natives-windows"      -> "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows.jar"
+///
+/// The classifier (4th `:`-separated part) MUST be kept: modern Minecraft ships
+/// LWJGL/OpenAL natives as classifier'd entries, and dropping it makes the
+/// natives jar collide with the core jar on disk — which clobbers LWJGL and
+/// crashes the game at startup with NoClassDefFoundError on org.lwjgl.* .
 fn maven_coord_to_path(coord: &str) -> PathBuf {
     let parts: Vec<&str> = coord.split(':').collect();
     if parts.len() < 3 {
@@ -333,7 +340,9 @@ fn maven_coord_to_path(coord: &str) -> PathBuf {
     }
     let (group, artifact, version) = (parts[0], parts[1], parts[2]);
     let group_path = group.replace('.', "/");
-    PathBuf::from(format!(
-        "{group_path}/{artifact}/{version}/{artifact}-{version}.jar"
-    ))
+    let filename = match parts.get(3) {
+        Some(classifier) => format!("{artifact}-{version}-{classifier}.jar"),
+        None => format!("{artifact}-{version}.jar"),
+    };
+    PathBuf::from(format!("{group_path}/{artifact}/{version}/{filename}"))
 }
