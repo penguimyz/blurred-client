@@ -217,9 +217,9 @@ pub async fn launch_instance(
 ) -> Result<(), String> {
     let (dir, mut instance) = find_instance(&state, &instance_id)?;
 
-    if instance.loader != Loader::Vanilla {
+    if !matches!(instance.loader, Loader::Vanilla | Loader::Fabric) {
         return Err(format!(
-            "{:?} loader installers aren't wired up yet -- vanilla only for now",
+            "{:?} loader installers aren't wired up yet -- Vanilla and Fabric only for now",
             instance.loader
         ));
     }
@@ -263,6 +263,45 @@ pub async fn launch_instance(
         classpath_jars.push(jar_path);
     }
 
+    // Progress logger -> the instance Logs tab (used by the Fabric + asset steps).
+    let log = |stream: &str, line: String| {
+        let _ = app.emit(
+            "instance-log",
+            serde_json::json!({ "instanceId": instance_id.clone(), "stream": stream, "line": line }),
+        );
+    };
+
+    // Loader step. Vanilla uses the client jar's main class as-is; Fabric adds
+    // its own libraries to the classpath and swaps in KnotClient. The loader
+    // version is resolved to latest-stable once, then persisted on the instance.
+    let mut main_class = detail.main_class.clone();
+    if instance.loader == Loader::Fabric {
+        let loader_version = match instance.loader_version.clone() {
+            Some(v) => v,
+            None => {
+                let v = crate::commands::fabric::latest_loader_version(&http, &instance.mc_version)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                instance.loader_version = Some(v.clone());
+                v
+            }
+        };
+        log("stdout", format!("[blurred] Fabric loader {loader_version}"));
+        let profile =
+            crate::commands::fabric::fetch_profile(&http, &instance.mc_version, &loader_version)
+                .await
+                .map_err(|e| e.to_string())?;
+        for lib in &profile.libraries {
+            let dest = libraries_dir.join(crate::commands::fabric::maven_path(&lib.name));
+            let url = crate::commands::fabric::maven_url(lib.url.as_deref(), &lib.name);
+            crate::commands::fabric::download_if_absent(&http, &url, &dest)
+                .await
+                .map_err(|e| e.to_string())?;
+            classpath_jars.push(dest);
+        }
+        main_class = profile.main_class;
+    }
+
     let classpath = build_classpath(&classpath_jars);
 
     // Asset sync (sounds/textures). Streamed to the instance log so the user can
@@ -270,12 +309,6 @@ pub async fn launch_instance(
     // surfaced but not fatal — the game may still start (just without some
     // assets), and the error tells the user exactly what to retry.
     let assets_dir = state.data_dir.join("assets");
-    let log = |stream: &str, line: String| {
-        let _ = app.emit(
-            "instance-log",
-            serde_json::json!({ "instanceId": instance_id.clone(), "stream": stream, "line": line }),
-        );
-    };
     log("stdout", format!("[blurred] Syncing assets (index {})…", detail.asset_index.id));
     match crate::commands::mojang::sync_assets(
         &http,
@@ -402,7 +435,7 @@ pub async fn launch_instance(
         instance_id.clone(),
         java_exe,
         jvm_args,
-        detail.main_class,
+        main_class,
         game_args,
         dir.clone(),
         env_vars,

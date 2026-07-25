@@ -19,6 +19,24 @@ const PROJECT_TYPES = [
   { key: "shader", label: "Shaders" },
 ];
 
+// A curated subset of Modrinth's mod categories, shown as filter chips.
+const MOD_CATEGORIES = [
+  "optimization",
+  "utility",
+  "game-mechanics",
+  "library",
+  "adventure",
+  "decoration",
+  "magic",
+  "technology",
+  "worldgen",
+  "mobs",
+  "storage",
+  "food",
+  "equipment",
+  "social",
+];
+
 export function Browse() {
   const [query, setQuery] = useState("");
   const [projectType, setProjectType] = useState("mod");
@@ -31,13 +49,21 @@ export function Browse() {
   const [searched, setSearched] = useState(false);
   const [installFor, setInstallFor] = useState<Hit | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [sortIndex, setSortIndex] = useState("downloads");
+  const [categories, setCategories] = useState<string[]>([]);
 
   async function search() {
     setLoading(true);
     setError(null);
     setSearched(true);
     try {
-      const res = await modrinthSearch(query, mcVersion || undefined, loader || undefined, projectType);
+      const res = await modrinthSearch(query, {
+        mcVersion: mcVersion || undefined,
+        loader: loader || undefined,
+        projectType,
+        categories: categories.length ? categories : undefined,
+        index: sortIndex,
+      });
       setResults(res.hits);
       setTotal(res.total_hits);
     } catch (e) {
@@ -47,6 +73,17 @@ export function Browse() {
       setLoading(false);
     }
   }
+
+  // Auto-run when the type / sort / category filters change (and once on mount,
+  // which loads the most-downloaded projects — i.e. "popular"). Query changes
+  // still wait for Enter/the Search button so we don't fire on every keystroke.
+  useEffect(() => {
+    search();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectType, sortIndex, categories]);
+
+  const toggleCategory = (c: string) =>
+    setCategories((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
 
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
@@ -96,10 +133,45 @@ export function Browse() {
             <label style={labelStyle}>Loader</label>
             <input value={loader} onChange={(e) => setLoader(e.target.value)} placeholder="any" style={inputStyle} />
           </div>
+          <div style={{ flex: 1, minWidth: 120 }}>
+            <label style={labelStyle}>Sort</label>
+            <select value={sortIndex} onChange={(e) => setSortIndex(e.target.value)} style={inputStyle}>
+              <option value="downloads">Popular</option>
+              <option value="relevance">Relevance</option>
+              <option value="follows">Followers</option>
+              <option value="newest">Newest</option>
+              <option value="updated">Recently updated</option>
+            </select>
+          </div>
           <button className="accent" onClick={search} disabled={loading} style={{ height: 36 }}>
             {loading ? "Searching…" : "Search"}
           </button>
         </div>
+
+        {projectType === "mod" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 12 }}>
+            {MOD_CATEGORIES.map((c) => {
+              const on = categories.includes(c);
+              return (
+                <button
+                  key={c}
+                  onClick={() => toggleCategory(c)}
+                  style={{
+                    fontSize: 11,
+                    padding: "4px 10px",
+                    borderRadius: 12,
+                    cursor: "pointer",
+                    border: "1px solid var(--glass-border)",
+                    background: on ? "var(--accent)" : "transparent",
+                    color: on ? "var(--accent-fg)" : "var(--text-secondary)",
+                  }}
+                >
+                  {c.replace(/-/g, " ")}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </GlassCard>
 
       {error && (

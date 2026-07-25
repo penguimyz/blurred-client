@@ -42,12 +42,18 @@ pub struct ProjectHit {
     pub project_type: String,  // "mod" | "modpack" | "resourcepack" | "shader"
 }
 
+/// Search Modrinth. An empty `query` combined with `index = "downloads"` is how
+/// the Browse page shows "popular" — Modrinth returns the most-downloaded
+/// projects for the given facets. `categories` are ANDed together (each its own
+/// facet group), same as the loader/version facets.
 #[tauri::command]
 pub async fn modrinth_search(
     query: String,
     mc_version: Option<String>,
     loader: Option<String>,
     project_type: Option<String>,
+    categories: Option<Vec<String>>,
+    index: Option<String>, // relevance | downloads | follows | newest | updated
 ) -> Result<SearchResult, String> {
     let client = reqwest::Client::new();
 
@@ -61,12 +67,23 @@ pub async fn modrinth_search(
     if let Some(t) = &project_type {
         facets.push(vec![format!("project_type:{t}")]);
     }
+    for c in categories.unwrap_or_default() {
+        facets.push(vec![format!("categories:{c}")]);
+    }
 
     let facets_json = serde_json::to_string(&facets).map_err(|e| e.to_string())?;
 
+    let mut query_params: Vec<(&str, String)> = vec![
+        ("query", query),
+        ("facets", facets_json),
+        ("limit", "40".to_string()),
+    ];
+    // Default to "downloads" so the page leads with popular projects.
+    query_params.push(("index", index.unwrap_or_else(|| "downloads".to_string())));
+
     let resp = client
         .get(format!("{MODRINTH_API_BASE}/search"))
-        .query(&[("query", query.as_str()), ("facets", facets_json.as_str())])
+        .query(&query_params)
         .header("User-Agent", USER_AGENT)
         .send()
         .await
@@ -158,40 +175,22 @@ fn pick_file(v: &ModrinthVersion) -> Option<&ModrinthFile> {
     v.files.iter().find(|f| f.primary).or_else(|| v.files.first())
 }
 
-/// Install a Modrinth project into an instance. Picks the newest version
-/// matching the instance's MC version + loader (or an explicit `version_id`),
-/// downloads the primary jar into `mods/`, and — when `with_dependencies` — walks
-/// the required dependency graph installing anything not already present.
-#[tauri::command]
-pub async fn install_modrinth_mod(
-    state: State<'_, AppState>,
-    instance_id: String,
-    project_id: String,
-    version_id: Option<String>,
+/// Core installer: from `start_project` (id or slug), download the newest
+/// version matching this instance's MC version + loader and record a ModRef;
+/// when `with_dependencies`, walk the required-dependency graph too. `visited`
+/// is shared across calls so a bulk install doesn't re-fetch shared deps.
+async fn resolve_and_download(
+    client: &reqwest::Client,
+    instance: &mut Instance,
+    mods_dir: &std::path::Path,
+    mc: &str,
+    loader: Option<&str>,
+    start_project: String,
+    start_version: Option<String>,
     with_dependencies: bool,
-) -> Result<Instance, String> {
-    let (dir, mut instance) = find_instance(&state, &instance_id)?;
-    let mods_dir = dir.join("mods");
-    std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
-
-    let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
-    let mc = instance.mc_version.clone();
-
-    // Seed "already handled" with the projects the instance already has, so
-    // dependency resolution never reinstalls Fabric API et al.
-    let mut visited: HashSet<String> = instance
-        .mods
-        .iter()
-        .filter(|m| m.source == ModSource::Modrinth)
-        .map(|m| m.id.clone())
-        .collect();
-
-    // Explicitly requested project is always (re)installed even if present, so
-    // clicking Install on something you have refreshes it to the chosen version.
-    visited.remove(&project_id);
-
-    let mut queue: Vec<(String, Option<String>)> = vec![(project_id, version_id)];
+    visited: &mut HashSet<String>,
+) -> Result<(), String> {
+    let mut queue: Vec<(String, Option<String>)> = vec![(start_project, start_version)];
 
     while let Some((pid, vid)) = queue.pop() {
         if visited.contains(&pid) {
@@ -199,12 +198,12 @@ pub async fn install_modrinth_mod(
         }
         visited.insert(pid.clone());
 
-        let versions = fetch_project_versions(&client, &pid, &mc, loader).await?;
+        let versions = fetch_project_versions(client, &pid, mc, loader).await?;
         let version = match vid {
             Some(ref want) => versions.into_iter().find(|v| &v.id == want),
             None => versions.into_iter().next(),
         }
-        .ok_or_else(|| format!("no {mc} / {:?} version available for project {pid}", instance.loader))?;
+        .ok_or_else(|| format!("no {mc} / {loader:?} version available for project {pid}"))?;
 
         let file = pick_file(&version)
             .ok_or_else(|| format!("project {pid} version has no downloadable file"))?
@@ -219,7 +218,7 @@ pub async fn install_modrinth_mod(
         }
         instance.mods.retain(|m| m.id != pid);
 
-        download_if_missing(&client, &file.url, &mods_dir.join(&file.filename), file.size)
+        download_if_missing(client, &file.url, &mods_dir.join(&file.filename), file.size)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -246,10 +245,128 @@ pub async fn install_modrinth_mod(
             }
         }
     }
+    Ok(())
+}
+
+fn tracked_modrinth_ids(instance: &Instance) -> HashSet<String> {
+    instance
+        .mods
+        .iter()
+        .filter(|m| m.source == ModSource::Modrinth)
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// Install a single Modrinth project into an instance (Browse → Install). Picks
+/// the newest matching version, resolves required dependencies, and refreshes the
+/// project even if it's already installed.
+#[tauri::command]
+pub async fn install_modrinth_mod(
+    state: State<'_, AppState>,
+    instance_id: String,
+    project_id: String,
+    version_id: Option<String>,
+    with_dependencies: bool,
+) -> Result<Instance, String> {
+    let (dir, mut instance) = find_instance(&state, &instance_id)?;
+    let mods_dir = dir.join("mods");
+    std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::new();
+    let loader = loader_slug(instance.loader);
+    let mc = instance.mc_version.clone();
+
+    let mut visited = tracked_modrinth_ids(&instance);
+    visited.remove(&project_id); // force refresh of the explicitly-requested project
+    resolve_and_download(&client, &mut instance, &mods_dir, &mc, loader, project_id, version_id, with_dependencies, &mut visited).await?;
 
     instance.mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     save_instance(&dir, &instance).map_err(|e| e.to_string())?;
     Ok(instance)
+}
+
+/// Install many projects (ids or slugs) at once — used for the default modpack.
+/// Failures are per-project (a mod with no build for this MC version is skipped)
+/// so one bad slug never sinks the batch; the count of failures is returned via
+/// the log-free `Result` only when *nothing* installed.
+#[tauri::command]
+pub async fn install_mods(
+    state: State<'_, AppState>,
+    instance_id: String,
+    projects: Vec<String>,
+    with_dependencies: bool,
+) -> Result<Instance, String> {
+    let (dir, mut instance) = find_instance(&state, &instance_id)?;
+    let mods_dir = dir.join("mods");
+    std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
+
+    let client = reqwest::Client::new();
+    let loader = loader_slug(instance.loader);
+    let mc = instance.mc_version.clone();
+
+    let mut visited = tracked_modrinth_ids(&instance);
+    let mut installed_any = false;
+    let mut last_err: Option<String> = None;
+    for p in projects {
+        match resolve_and_download(&client, &mut instance, &mods_dir, &mc, loader, p, None, with_dependencies, &mut visited).await {
+            Ok(()) => installed_any = true,
+            Err(e) => last_err = Some(e),
+        }
+    }
+
+    instance.mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    save_instance(&dir, &instance).map_err(|e| e.to_string())?;
+
+    if !installed_any {
+        if let Some(e) = last_err {
+            return Err(format!("no mods could be installed — is this a Fabric instance on a supported version? ({e})"));
+        }
+    }
+    Ok(instance)
+}
+
+/// The "Blurred Essentials" default modpack (spec §5.4): a Fabric performance +
+/// QoL set, by Modrinth slug. Offered when creating a new instance.
+pub const BLURRED_ESSENTIALS: &[&str] = &[
+    "fabric-api",
+    "fabric-language-kotlin",
+    "sodium",
+    "lithium",
+    "ferrite-core",
+    "modernfix",
+    "immediatelyfast",
+    "moreculling",
+    "morecullingextra",
+    "entityculling",
+    "krypton",
+    "dynamic-fps",
+    "cloth-config",
+    "yacl",
+    "modmenu",
+    "jade",
+    "appleskin",
+    "reeses-sodium-options",
+    "zoomify",
+    "controlling",
+    "clumps",
+    "shulkerboxtooltip",
+    "malilib",
+    "simple-voice-chat",
+    "jei",
+    "searchables",
+    "combat-hitboxes",
+    "consumableoptimizer",
+    "complete-shield-fixes",
+    "gamma-utils",
+    "walksylib",
+    "ukulib",
+    "ukus-armor-hud",
+    "horse-statistics",
+];
+
+#[tauri::command]
+pub fn blurred_essentials() -> Vec<String> {
+    BLURRED_ESSENTIALS.iter().map(|s| s.to_string()).collect()
 }
 
 #[derive(Debug, Clone, Serialize)]

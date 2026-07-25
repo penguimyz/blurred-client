@@ -200,16 +200,36 @@ export interface ModrinthSearchResult {
 
 export function modrinthSearch(
   query: string,
-  mcVersion?: string,
-  loader?: string,
-  projectType?: string
+  opts: {
+    mcVersion?: string;
+    loader?: string;
+    projectType?: string;
+    categories?: string[];
+    index?: string; // relevance | downloads | follows | newest | updated
+  } = {}
 ): Promise<ModrinthSearchResult> {
   return invoke("modrinth_search", {
     query,
-    mcVersion,
-    loader,
-    projectType,
+    mcVersion: opts.mcVersion,
+    loader: opts.loader,
+    projectType: opts.projectType,
+    categories: opts.categories,
+    index: opts.index,
   });
+}
+
+/** Install many Modrinth projects (ids or slugs) at once — the default modpack. */
+export function installMods(
+  instanceId: string,
+  projects: string[],
+  withDependencies: boolean
+): Promise<Instance> {
+  return invoke("install_mods", { instanceId, projects, withDependencies });
+}
+
+/** The default "Blurred Essentials" modpack slugs. */
+export function blurredEssentials(): Promise<string[]> {
+  return invoke("blurred_essentials");
 }
 
 /** Download + install a Modrinth project into an instance (optionally with its

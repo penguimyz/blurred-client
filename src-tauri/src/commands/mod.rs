@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod config;
 pub mod content;
+pub mod fabric;
 pub mod instance;
 pub mod java;
 pub mod modpacks;

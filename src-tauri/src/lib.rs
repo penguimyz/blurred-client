@@ -68,6 +68,8 @@ pub fn run() {
             commands::modpacks::reveal_path,
             commands::modrinth::modrinth_search,
             commands::modrinth::install_modrinth_mod,
+            commands::modrinth::install_mods,
+            commands::modrinth::blurred_essentials,
             commands::modrinth::check_mod_updates,
             commands::modrinth::update_mod,
             commands::modrinth::update_all_mods,
