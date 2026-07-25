@@ -322,6 +322,11 @@ export function setAccountSkin(accountId: string, url: string, variant: string):
   return invoke("set_account_skin", { accountId, url, variant });
 }
 
+/** Change a Microsoft account's skin from a local PNG file. */
+export function setAccountSkinFile(accountId: string, filePath: string, variant: string): Promise<Account> {
+  return invoke("set_account_skin_file", { accountId, filePath, variant });
+}
+
 export function resetAccountSkin(accountId: string): Promise<Account> {
   return invoke("reset_account_skin", { accountId });
 }

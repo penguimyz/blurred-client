@@ -131,31 +131,32 @@ pub struct ModrinthDependency {
     pub dependency_type: String, // "required" | "optional" | "incompatible" | "embedded"
 }
 
-/// Modrinth loader slug for an instance's loader. Vanilla has no loader, so mod
-/// version queries for it aren't loader-filtered (they'll generally come back
-/// empty for actual mods, which surfaces as a clear "no compatible version").
-fn loader_slug(loader: Loader) -> Option<&'static str> {
+/// Modrinth loader slug(s) compatible with an instance's loader — this is the
+/// "auto-detect what to install" logic. Quilt can load Fabric mods, so a Quilt
+/// instance searches both. Vanilla has no loader (mod queries come back empty,
+/// which surfaces as a clear "no compatible version").
+fn loader_slugs(loader: Loader) -> Vec<&'static str> {
     match loader {
-        Loader::Vanilla => None,
-        Loader::Fabric => Some("fabric"),
-        Loader::Forge => Some("forge"),
-        Loader::Quilt => Some("quilt"),
-        Loader::NeoForge => Some("neoforge"),
+        Loader::Vanilla => vec![],
+        Loader::Fabric => vec!["fabric"],
+        Loader::Quilt => vec!["quilt", "fabric"], // Quilt runs Fabric mods
+        Loader::Forge => vec!["forge"],
+        Loader::NeoForge => vec!["neoforge"],
     }
 }
 
-/// Fetch a project's versions filtered to this MC version (+ loader when the
-/// instance has one), newest first. `project` may be a project id or slug.
+/// Fetch a project's versions filtered to this MC version (+ compatible loaders),
+/// newest first. `project` may be a project id or slug.
 async fn fetch_project_versions(
     client: &reqwest::Client,
     project: &str,
     mc_version: &str,
-    loader: Option<&str>,
+    loaders: &[&str],
 ) -> Result<Vec<ModrinthVersion>, String> {
     let game_versions = serde_json::to_string(&[mc_version]).map_err(|e| e.to_string())?;
     let mut query: Vec<(&str, String)> = vec![("game_versions", game_versions)];
-    if let Some(l) = loader {
-        query.push(("loaders", serde_json::to_string(&[l]).map_err(|e| e.to_string())?));
+    if !loaders.is_empty() {
+        query.push(("loaders", serde_json::to_string(loaders).map_err(|e| e.to_string())?));
     }
 
     let resp = client
@@ -188,7 +189,7 @@ async fn resolve_and_download(
     instance: &mut Instance,
     mods_dir: &std::path::Path,
     mc: &str,
-    loader: Option<&str>,
+    loaders: &[&str],
     start_project: String,
     start_version: Option<String>,
     with_dependencies: bool,
@@ -205,12 +206,12 @@ async fn resolve_and_download(
             continue;
         }
 
-        let versions = fetch_project_versions(client, &pid, mc, loader).await?;
+        let versions = fetch_project_versions(client, &pid, mc, loaders).await?;
         let version = match vid {
             Some(ref want) => versions.into_iter().find(|v| &v.id == want),
             None => versions.into_iter().next(),
         }
-        .ok_or_else(|| format!("no {mc} / {loader:?} version available for project {pid}"))?;
+        .ok_or_else(|| format!("no {mc} / {loaders:?} version available for project {pid}"))?;
 
         // Canonical identity, regardless of whether we were asked by slug or id.
         let canonical = if version.project_id.is_empty() {
@@ -292,12 +293,12 @@ pub async fn install_modrinth_mod(
     std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
+    let loaders = loader_slugs(instance.loader);
     let mc = instance.mc_version.clone();
 
     let mut visited = tracked_modrinth_ids(&instance);
     visited.remove(&project_id); // force refresh of the explicitly-requested project
-    resolve_and_download(&client, &mut instance, &mods_dir, &mc, loader, project_id, version_id, with_dependencies, &mut visited).await?;
+    resolve_and_download(&client, &mut instance, &mods_dir, &mc, &loaders,project_id, version_id, with_dependencies, &mut visited).await?;
 
     instance.mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     save_instance(&dir, &instance).map_err(|e| e.to_string())?;
@@ -320,14 +321,14 @@ pub async fn install_mods(
     std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
 
     let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
+    let loaders = loader_slugs(instance.loader);
     let mc = instance.mc_version.clone();
 
     let mut visited = tracked_modrinth_ids(&instance);
     let mut installed_any = false;
     let mut last_err: Option<String> = None;
     for p in projects {
-        match resolve_and_download(&client, &mut instance, &mods_dir, &mc, loader, p, None, with_dependencies, &mut visited).await {
+        match resolve_and_download(&client, &mut instance, &mods_dir, &mc, &loaders,p, None, with_dependencies, &mut visited).await {
             Ok(()) => installed_any = true,
             Err(e) => last_err = Some(e),
         }
@@ -407,7 +408,7 @@ pub async fn check_mod_updates(
 ) -> Result<Vec<ModUpdate>, String> {
     let (_, instance) = find_instance(&state, &instance_id)?;
     let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
+    let loaders = loader_slugs(instance.loader);
     let mc = instance.mc_version.clone();
 
     let mut out = Vec::new();
@@ -416,7 +417,7 @@ pub async fn check_mod_updates(
             continue;
         }
         // A failed lookup for one mod shouldn't sink the whole check.
-        let Ok(versions) = fetch_project_versions(&client, &m.id, &mc, loader).await else {
+        let Ok(versions) = fetch_project_versions(&client, &m.id, &mc, &loaders).await else {
             continue;
         };
         if let Some(latest) = versions.into_iter().next() {
@@ -447,14 +448,14 @@ async fn upgrade_one(
     instance: &mut Instance,
     idx: usize,
     mc: &str,
-    loader: Option<&str>,
+    loaders: &[&str],
 ) -> Result<bool, String> {
     let (project, old_filename, was_enabled, cur_vid, cur_ver) = {
         let m = &instance.mods[idx];
         (m.id.clone(), m.filename.clone(), m.enabled, m.version_id.clone(), m.version.clone())
     };
 
-    let versions = fetch_project_versions(client, &project, mc, loader).await?;
+    let versions = fetch_project_versions(client, &project, mc, loaders).await?;
     let Some(latest) = versions.into_iter().next() else {
         return Ok(false);
     };
@@ -504,9 +505,9 @@ pub async fn update_mod(
         return Err("only Modrinth mods can be auto-updated".to_string());
     }
     let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
+    let loaders = loader_slugs(instance.loader);
     let mc = instance.mc_version.clone();
-    upgrade_one(&client, &dir.join("mods"), &mut instance, idx, &mc, loader).await?;
+    upgrade_one(&client, &dir.join("mods"), &mut instance, idx, &mc, &loaders).await?;
     save_instance(&dir, &instance).map_err(|e| e.to_string())?;
     Ok(instance)
 }
@@ -518,7 +519,7 @@ pub async fn update_all_mods(
 ) -> Result<Instance, String> {
     let (dir, mut instance) = find_instance(&state, &instance_id)?;
     let client = reqwest::Client::new();
-    let loader = loader_slug(instance.loader);
+    let loaders = loader_slugs(instance.loader);
     let mc = instance.mc_version.clone();
     let mods_dir = dir.join("mods");
 
@@ -532,7 +533,7 @@ pub async fn update_all_mods(
 
     for i in targets {
         // Skip failures per-mod so one unreachable project doesn't abort the batch.
-        let _ = upgrade_one(&client, &mods_dir, &mut instance, i, &mc, loader).await;
+        let _ = upgrade_one(&client, &mods_dir, &mut instance, i, &mc, &loaders).await;
     }
     save_instance(&dir, &instance).map_err(|e| e.to_string())?;
     Ok(instance)

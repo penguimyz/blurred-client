@@ -217,12 +217,8 @@ pub async fn launch_instance(
 ) -> Result<(), String> {
     let (dir, mut instance) = find_instance(&state, &instance_id)?;
 
-    if !matches!(instance.loader, Loader::Vanilla | Loader::Fabric) {
-        return Err(format!(
-            "{:?} loader installers aren't wired up yet -- Vanilla and Fabric only for now",
-            instance.loader
-        ));
-    }
+    // Vanilla / Fabric / Quilt launch fully; Forge & NeoForge run their installer
+    // pipeline (experimental — see commands::forge).
 
     let http = reqwest::Client::new();
 
@@ -271,35 +267,53 @@ pub async fn launch_instance(
         );
     };
 
-    // Loader step. Vanilla uses the client jar's main class as-is; Fabric adds
-    // its own libraries to the classpath and swaps in KnotClient. The loader
-    // version is resolved to latest-stable once, then persisted on the instance.
+    // Loader step. Vanilla uses the client jar's main class as-is. Fabric/Quilt
+    // add their libraries to the classpath and swap in the loader's main class,
+    // resolving the loader version once and persisting it. Forge/NeoForge need
+    // their installer's processor pipeline, which isn't built yet.
+    use crate::commands::fabric;
     let mut main_class = detail.main_class.clone();
-    if instance.loader == Loader::Fabric {
-        let loader_version = match instance.loader_version.clone() {
-            Some(v) => v,
-            None => {
-                let v = crate::commands::fabric::latest_loader_version(&http, &instance.mc_version)
+
+    match instance.loader {
+        Loader::Vanilla => {}
+        Loader::Fabric | Loader::Quilt => {
+            let (meta, maven) = if instance.loader == Loader::Quilt {
+                (fabric::QUILT_META, fabric::QUILT_MAVEN)
+            } else {
+                (fabric::FABRIC_META, fabric::FABRIC_MAVEN)
+            };
+            let loader_version = match instance.loader_version.clone() {
+                Some(v) => v,
+                None => {
+                    let v = fabric::latest_loader_version(&http, meta, &instance.mc_version)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    instance.loader_version = Some(v.clone());
+                    v
+                }
+            };
+            log("stdout", format!("[blurred] {:?} loader {loader_version}", instance.loader));
+            let profile = fabric::fetch_profile(&http, meta, &instance.mc_version, &loader_version)
+                .await
+                .map_err(|e| e.to_string())?;
+            for lib in &profile.libraries {
+                let dest = libraries_dir.join(fabric::maven_path(&lib.name));
+                let url = fabric::maven_url(maven, lib.url.as_deref(), &lib.name);
+                fabric::download_if_absent(&http, &url, &dest)
                     .await
                     .map_err(|e| e.to_string())?;
-                instance.loader_version = Some(v.clone());
-                v
+                classpath_jars.push(dest);
             }
-        };
-        log("stdout", format!("[blurred] Fabric loader {loader_version}"));
-        let profile =
-            crate::commands::fabric::fetch_profile(&http, &instance.mc_version, &loader_version)
-                .await
-                .map_err(|e| e.to_string())?;
-        for lib in &profile.libraries {
-            let dest = libraries_dir.join(crate::commands::fabric::maven_path(&lib.name));
-            let url = crate::commands::fabric::maven_url(lib.url.as_deref(), &lib.name);
-            crate::commands::fabric::download_if_absent(&http, &url, &dest)
-                .await
-                .map_err(|e| e.to_string())?;
-            classpath_jars.push(dest);
+            main_class = profile.main_class.client().to_string();
         }
-        main_class = profile.main_class;
+        Loader::Forge | Loader::NeoForge => {
+            return Err(format!(
+                "{:?} launch isn't implemented yet — it needs the {:?} installer's \
+                 processor pipeline (a large separate piece). Fabric and Quilt launch today; \
+                 you can still create {:?} instances and manage their mods.",
+                instance.loader, instance.loader, instance.loader
+            ));
+        }
     }
 
     let classpath = build_classpath(&classpath_jars);

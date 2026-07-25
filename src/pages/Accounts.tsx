@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { useAccountStore } from "../store/accountStore";
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
+import { open } from "@tauri-apps/plugin-dialog";
 import { MicrosoftLoginButton } from "../components/MicrosoftLoginButton";
-import { createOfflineAccount, resetAccountSkin, setAccountSkin } from "../lib/tauri";
+import { createOfflineAccount, resetAccountSkin, setAccountSkin, setAccountSkinFile } from "../lib/tauri";
 import { formatRelativeDate } from "../lib/format";
 import type { Account } from "../types/account";
 
@@ -22,7 +23,7 @@ function ActiveDot() {
 }
 
 function SkinEditor({ account, onDone }: { account: Account; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [url, setUrl] = useState("");
   const [variant, setVariant] = useState("classic");
   const [busy, setBusy] = useState(false);
@@ -34,7 +35,7 @@ function SkinEditor({ account, onDone }: { account: Account; onDone: () => void 
     try {
       await fn();
       setUrl("");
-      setOpen(false);
+      setEditing(false);
       onDone();
     } catch (e) {
       setError(String(e));
@@ -43,9 +44,16 @@ function SkinEditor({ account, onDone }: { account: Account; onDone: () => void 
     }
   }
 
-  if (!open) {
+  async function pickFile() {
+    const picked = await open({ multiple: false, filters: [{ name: "Skin PNG", extensions: ["png"] }] });
+    if (typeof picked === "string") {
+      await run(() => setAccountSkinFile(account.id, picked, variant));
+    }
+  }
+
+  if (!editing) {
     return (
-      <button onClick={() => setOpen(true)} style={skinBtn}>
+      <button onClick={() => setEditing(true)} style={skinBtn}>
         Change skin
       </button>
     );
@@ -53,26 +61,32 @@ function SkinEditor({ account, onDone }: { account: Account; onDone: () => void 
 
   return (
     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-      <input
-        value={url}
-        onChange={(e) => setUrl(e.target.value)}
-        placeholder="https://…/skin.png"
-        spellCheck={false}
-        style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}
-      />
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <label style={{ fontSize: 11, color: "var(--text-secondary)" }}>Model</label>
         <select value={variant} onChange={(e) => setVariant(e.target.value)} style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}>
           <option value="classic">Classic</option>
           <option value="slim">Slim</option>
         </select>
-        <button className="accent" disabled={busy || !url.trim()} onClick={() => run(() => setAccountSkin(account.id, url.trim(), variant))} style={{ fontSize: 12, padding: "6px 10px" }}>
-          {busy ? "…" : "Apply"}
+        <button className="accent" disabled={busy} onClick={pickFile} style={{ fontSize: 12, padding: "6px 10px" }}>
+          {busy ? "…" : "From file…"}
         </button>
         <button disabled={busy} onClick={() => run(() => resetAccountSkin(account.id))} style={skinBtn}>
           Reset
         </button>
-        <button disabled={busy} onClick={() => setOpen(false)} style={skinBtn}>
+        <button disabled={busy} onClick={() => setEditing(false)} style={skinBtn}>
           Cancel
+        </button>
+      </div>
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="…or paste a public .png URL"
+          spellCheck={false}
+          style={{ flex: 1, padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}
+        />
+        <button className="accent" disabled={busy || !url.trim()} onClick={() => run(() => setAccountSkin(account.id, url.trim(), variant))} style={{ fontSize: 12, padding: "6px 10px" }}>
+          {busy ? "…" : "Apply URL"}
         </button>
       </div>
       {error && <div style={{ color: "var(--danger)", fontSize: 11 }}>{error}</div>}

@@ -13,6 +13,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let state = AppState::init().expect("failed to initialize app state -- check disk permissions on the data dir");
             app.manage(state);
@@ -82,6 +83,7 @@ pub fn run() {
             commands::online_auth::begin_msa_login,
             commands::online_auth::complete_msa_login,
             commands::online_auth::set_account_skin,
+            commands::online_auth::set_account_skin_file,
             commands::online_auth::reset_account_skin,
             commands::update::check_launcher_update,
         ])

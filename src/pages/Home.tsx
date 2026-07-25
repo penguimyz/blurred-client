@@ -263,9 +263,9 @@ function CreateInstanceModal({ onClose, onDone }: { onClose: () => void; onDone:
           >
             <option value="vanilla">Vanilla</option>
             <option value="fabric">Fabric</option>
-            <option value="forge">Forge (not launchable yet)</option>
-            <option value="quilt">Quilt (not launchable yet)</option>
-            <option value="neoforge">NeoForge (not launchable yet)</option>
+            <option value="quilt">Quilt</option>
+            <option value="forge">Forge (experimental — launch WIP)</option>
+            <option value="neoforge">NeoForge (experimental — launch WIP)</option>
           </select>
           {installDefaults && (
             <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: -4, marginBottom: 8 }}>

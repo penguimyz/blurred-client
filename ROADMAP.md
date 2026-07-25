@@ -161,10 +161,10 @@ contracts but NOT live-tested from the sandbox.
 - [x] Per-instance account assignment — the instance Settings tab has a "Launch
       as account" picker (`Instance.account_id`); `launch_instance` uses it when
       set, falling back to the global active account.
-- [x] Skin management — the Accounts page can change a Microsoft account's skin
-      from a PNG URL (classic/slim) or reset it (`set_account_skin` /
-      `reset_account_skin` via the Minecraft Services API). A local-file skin
-      library is the remaining nicety.
+- [x] Skin management — the Accounts page changes a Microsoft account's skin from
+      a **local PNG file** (native file picker, `set_account_skin_file` multipart)
+      or a PNG URL, classic/slim, and can reset it, via the Minecraft Services
+      API. (A saved skin library is the remaining nicety.)
 
 **Offline-mode limitation:** offline accounts can only join `online-mode=false`
 servers. Microsoft accounts can join online servers and Realms.

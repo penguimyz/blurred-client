@@ -1,17 +1,20 @@
-// Fabric loader support via the public Fabric meta API (meta.fabricmc.net, no
-// key). Fabric is the simplest loader to launch: take the vanilla client jar +
-// vanilla libraries, add Fabric's own libraries (loader, intermediary mappings,
-// asm, etc.) to the classpath, and swap the main class to Fabric's KnotClient.
-// The loader then discovers mods in <gameDir>/mods on its own.
+// Fabric-family loader support (Fabric + Quilt) via their public meta APIs
+// (meta.fabricmc.net / meta.quiltmc.org, no key). Both expose the same shape:
+// a list of loader versions, and a per-(game,loader) "profile" JSON giving the
+// main class + extra libraries. Launch = vanilla client jar + vanilla libs +
+// these libs on the classpath, with the loader's main class instead of vanilla's.
 //
-// Not live-tested from the sandbox (no network to meta.fabricmc.net) — written
-// against the documented, stable v2 schema.
+// Not live-tested against the meta endpoints from the sandbox — written to the
+// documented, stable schema. (Fabric launch IS confirmed working on the user's
+// machine; Quilt mirrors it.)
 
 use serde::Deserialize;
 use std::path::Path;
 
-const FABRIC_META: &str = "https://meta.fabricmc.net/v2";
-const FABRIC_MAVEN: &str = "https://maven.fabricmc.net/";
+pub const FABRIC_META: &str = "https://meta.fabricmc.net/v2";
+pub const FABRIC_MAVEN: &str = "https://maven.fabricmc.net/";
+pub const QUILT_META: &str = "https://meta.quiltmc.org/v3";
+pub const QUILT_MAVEN: &str = "https://maven.quiltmc.org/repository/release/";
 
 #[derive(Debug, Deserialize)]
 struct LoaderEntry {
@@ -23,48 +26,65 @@ struct LoaderInfo {
     stable: bool,
 }
 
-/// Newest *stable* Fabric loader version for a game version (falls back to the
-/// newest of any stability if none are marked stable).
+/// Newest *stable* loader version for a game version (falls back to newest of
+/// any stability if none are marked stable — Quilt often has no "stable" flag set).
 pub async fn latest_loader_version(
     client: &reqwest::Client,
+    meta_base: &str,
     game_version: &str,
 ) -> anyhow::Result<String> {
-    let url = format!("{FABRIC_META}/versions/loader/{game_version}");
+    let url = format!("{meta_base}/versions/loader/{game_version}");
     let list: Vec<LoaderEntry> = client.get(url).send().await?.json().await?;
     let chosen = list
         .iter()
         .find(|e| e.loader.stable)
         .or_else(|| list.first())
-        .ok_or_else(|| anyhow::anyhow!("no Fabric loader available for Minecraft {game_version}"))?;
+        .ok_or_else(|| anyhow::anyhow!("no loader version available for Minecraft {game_version}"))?;
     Ok(chosen.loader.version.clone())
 }
 
 #[derive(Debug, Deserialize)]
-pub struct FabricProfile {
+pub struct LoaderProfile {
     #[serde(rename = "mainClass")]
-    pub main_class: String,
-    pub libraries: Vec<FabricLibrary>,
+    pub main_class: MainClass,
+    pub libraries: Vec<ProfileLibrary>,
+}
+
+/// Fabric returns `mainClass` as a string; some Quilt profiles return an object
+/// `{ "client": "...", "server": "..." }`. Accept either and pick the client.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum MainClass {
+    Plain(String),
+    Sided { client: String },
+}
+
+impl MainClass {
+    pub fn client(&self) -> &str {
+        match self {
+            MainClass::Plain(s) => s,
+            MainClass::Sided { client } => client,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
-pub struct FabricLibrary {
+pub struct ProfileLibrary {
     pub name: String,        // maven coordinate
-    pub url: Option<String>, // maven repo base; defaults to Fabric's maven
+    pub url: Option<String>, // maven repo base; defaults to the loader's maven
 }
 
-/// The merged launch profile for a specific game+loader pair: Fabric's main
-/// class and the extra libraries to put on the classpath.
 pub async fn fetch_profile(
     client: &reqwest::Client,
+    meta_base: &str,
     game_version: &str,
     loader_version: &str,
-) -> anyhow::Result<FabricProfile> {
-    let url = format!("{FABRIC_META}/versions/loader/{game_version}/{loader_version}/profile/json");
+) -> anyhow::Result<LoaderProfile> {
+    let url = format!("{meta_base}/versions/loader/{game_version}/{loader_version}/profile/json");
     Ok(client.get(url).send().await?.json().await?)
 }
 
 /// "group:artifact:version[:classifier]" -> "group/path/artifact/version/file.jar"
-/// (forward slashes; usable both as a URL suffix and, via join, a filesystem path).
 pub fn maven_path(coord: &str) -> String {
     let parts: Vec<&str> = coord.split(':').collect();
     if parts.len() < 3 {
@@ -79,15 +99,14 @@ pub fn maven_path(coord: &str) -> String {
     format!("{group_path}/{artifact}/{version}/{filename}")
 }
 
-pub fn maven_url(base: Option<&str>, coord: &str) -> String {
-    let base = base.unwrap_or(FABRIC_MAVEN);
+pub fn maven_url(default_maven: &str, base: Option<&str>, coord: &str) -> String {
+    let base = base.unwrap_or(default_maven);
     let sep = if base.ends_with('/') { "" } else { "/" };
     format!("{base}{sep}{}", maven_path(coord))
 }
 
-/// Download to `dest` unless it already exists. Fabric meta doesn't publish
-/// per-library sizes/hashes, so "already present" is the skip condition (the
-/// coordinate includes the exact version, so a present file is the right file).
+/// Download to `dest` unless it already exists (the coordinate pins the exact
+/// version, so a present file is the right one).
 pub async fn download_if_absent(
     client: &reqwest::Client,
     url: &str,

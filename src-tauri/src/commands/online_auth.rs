@@ -448,6 +448,43 @@ pub async fn set_account_skin(
     store_skin_url(&state, account.id, profile.skin_url)
 }
 
+/// Change the account's skin from a local PNG file (multipart upload).
+#[tauri::command]
+pub async fn set_account_skin_file(
+    state: State<'_, AppState>,
+    account_id: String,
+    file_path: String,
+    variant: String,
+) -> Result<Account, String> {
+    let client_id = client_id(&state);
+    let account = find_microsoft_account(&state, &account_id)?;
+    let token = authenticate_for_launch(&client_id, &account).await?.access_token;
+
+    let bytes = std::fs::read(&file_path).map_err(|e| e.to_string())?;
+    let part = reqwest::multipart::Part::bytes(bytes)
+        .file_name("skin.png")
+        .mime_str("image/png")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .text("variant", variant)
+        .part("file", part);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(MC_SKINS_URL)
+        .bearer_auth(&token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("skin upload was rejected ({}) — needs a valid 64x64 (or 64x32) PNG", resp.status()));
+    }
+
+    let profile = fetch_profile(&client, &token).await?;
+    store_skin_url(&state, account.id, profile.skin_url)
+}
+
 /// Reset to the default (Steve/Alex) skin.
 #[tauri::command]
 pub async fn reset_account_skin(
