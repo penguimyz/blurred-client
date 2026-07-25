@@ -52,7 +52,7 @@ export default function App() {
           ) : (
             <>
               {active === "home" && <Home onOpenInstance={setOpenInstance} />}
-              {active === "browse" && <Browse />}
+              {active === "browse" && <Browse onOpenInstance={setOpenInstance} />}
               {active === "modpacks" && <Modpacks onOpenInstance={setOpenInstance} />}
               {active === "accounts" && <Accounts />}
               {active === "settings" && <Settings />}

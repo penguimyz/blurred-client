@@ -4,6 +4,7 @@ import { useSettingsStore, applyTheme, applyAccent } from "../store/settingsStor
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
 import { CustomCommandsForm, EnvVarsForm, JavaForm } from "../components/OverrideSettingsForm";
+import { checkLauncherUpdate, type UpdateStatus } from "../lib/tauri";
 
 // Global launcher settings (spec §10). The Java/Env/Commands editors here are
 // the very same components the per-instance Settings tab uses — this screen just
@@ -22,6 +23,8 @@ export function Settings() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
 
   useEffect(() => {
     if (!settings) refresh();
@@ -150,6 +153,53 @@ export function Settings() {
                 onChange={(e) => set("updateCheckFrequencyMinutes", Number(e.target.value))}
                 style={inputStyle}
               />
+            </div>
+            <div>
+              <label style={labelStyle}>Update source (GitHub owner/name)</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  value={draft.updateRepo}
+                  onChange={(e) => set("updateRepo", e.target.value)}
+                  placeholder="e.g. your-user/blurred-client (blank = disabled)"
+                  style={{ ...inputStyle, flex: 1 }}
+                />
+                <button
+                  onClick={async () => {
+                    setCheckingUpdate(true);
+                    setUpdateStatus(null);
+                    try {
+                      // Save first so the check uses the current repo value.
+                      if (draft) await save(draft);
+                      setUpdateStatus(await checkLauncherUpdate());
+                    } catch (e) {
+                      setError(String(e));
+                    } finally {
+                      setCheckingUpdate(false);
+                    }
+                  }}
+                  style={{ ...pill, whiteSpace: "nowrap" }}
+                  disabled={checkingUpdate}
+                >
+                  {checkingUpdate ? "Checking…" : "Check for updates"}
+                </button>
+              </div>
+              {updateStatus && (
+                <div style={{ fontSize: 12, marginTop: 8, color: "var(--text-secondary)" }}>
+                  {!updateStatus.configured
+                    ? `Current version ${updateStatus.currentVersion}. Set a GitHub repo above to enable update checks.`
+                    : updateStatus.updateAvailable
+                      ? <>
+                          Update available: <strong>{updateStatus.latestVersion}</strong> (you have {updateStatus.currentVersion}).{" "}
+                          {updateStatus.url && <a href={updateStatus.url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)" }}>Release notes ↗</a>}
+                        </>
+                      : updateStatus.latestVersion
+                        ? `Up to date (${updateStatus.currentVersion}).`
+                        : updateStatus.notes ?? `Current version ${updateStatus.currentVersion}.`}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
+                Checks GitHub releases for a newer version. Auto-install isn't wired (needs signed releases) — this notifies only.
+              </div>
             </div>
           </div>
         </GlassCard>

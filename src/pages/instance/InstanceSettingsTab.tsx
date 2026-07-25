@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TabProps } from "./InstanceDetail";
 import type { Instance, Loader } from "../../types/instance";
+import { useAccountStore } from "../../store/accountStore";
 import { GlassCard } from "../../components/GlassCard";
 import {
   CustomCommandsForm,
@@ -18,10 +19,15 @@ import { updateInstance } from "../../lib/tauri";
 const LOADERS: Loader[] = ["vanilla", "fabric", "forge", "quilt", "neoforge"];
 
 export function InstanceSettingsTab({ instance, setInstance }: TabProps) {
+  const { accounts, refresh: refreshAccounts } = useAccountStore();
   const [draft, setDraft] = useState<Instance>(instance);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    refreshAccounts();
+  }, [refreshAccounts]);
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(instance);
   const set = <K extends keyof Instance>(k: K, v: Instance[K]) => setDraft({ ...draft, [k]: v });
@@ -85,6 +91,21 @@ export function InstanceSettingsTab({ instance, setInstance }: TabProps) {
               <label style={labelStyle}>Window height</label>
               <input type="number" value={draft.windowHeight} onChange={(e) => set("windowHeight", Number(e.target.value))} style={inputStyle} />
             </div>
+          </div>
+          <div>
+            <label style={labelStyle}>Launch as account</label>
+            <select
+              value={draft.accountId ?? ""}
+              onChange={(e) => set("accountId", e.target.value === "" ? null : e.target.value)}
+              style={inputStyle}
+            >
+              <option value="">Default (active account)</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.username} ({a.accountType})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </GlassCard>

@@ -3,7 +3,7 @@ import { useAccountStore } from "../store/accountStore";
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
 import { MicrosoftLoginButton } from "../components/MicrosoftLoginButton";
-import { createOfflineAccount } from "../lib/tauri";
+import { createOfflineAccount, resetAccountSkin, setAccountSkin } from "../lib/tauri";
 import { formatRelativeDate } from "../lib/format";
 import type { Account } from "../types/account";
 
@@ -21,7 +21,66 @@ function ActiveDot() {
   );
 }
 
-function AccountCard({ account, active, onActivate, onRemove }: { account: Account; active: boolean; onActivate: () => void; onRemove: () => void }) {
+function SkinEditor({ account, onDone }: { account: Account; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [url, setUrl] = useState("");
+  const [variant, setVariant] = useState("classic");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function run(fn: () => Promise<unknown>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+      setUrl("");
+      setOpen(false);
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={skinBtn}>
+        Change skin
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+      <input
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="https://…/skin.png"
+        spellCheck={false}
+        style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}
+      />
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <select value={variant} onChange={(e) => setVariant(e.target.value)} style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}>
+          <option value="classic">Classic</option>
+          <option value="slim">Slim</option>
+        </select>
+        <button className="accent" disabled={busy || !url.trim()} onClick={() => run(() => setAccountSkin(account.id, url.trim(), variant))} style={{ fontSize: 12, padding: "6px 10px" }}>
+          {busy ? "…" : "Apply"}
+        </button>
+        <button disabled={busy} onClick={() => run(() => resetAccountSkin(account.id))} style={skinBtn}>
+          Reset
+        </button>
+        <button disabled={busy} onClick={() => setOpen(false)} style={skinBtn}>
+          Cancel
+        </button>
+      </div>
+      {error && <div style={{ color: "var(--danger)", fontSize: 11 }}>{error}</div>}
+    </div>
+  );
+}
+
+function AccountCard({ account, active, onActivate, onRemove, onDone }: { account: Account; active: boolean; onActivate: () => void; onRemove: () => void; onDone: () => void }) {
   const isMs = account.accountType === "microsoft";
   return (
     <GlassCard>
@@ -51,7 +110,7 @@ function AccountCard({ account, active, onActivate, onRemove }: { account: Accou
         <MonoField value={account.mcUuid} copyable />
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
+      <div style={{ display: "flex", gap: 6, marginTop: 12, alignItems: "center", flexWrap: "wrap" }}>
         {!active && (
           <button className="accent" onClick={onActivate} style={{ fontSize: 12, padding: "6px 12px" }}>
             Set active
@@ -60,6 +119,7 @@ function AccountCard({ account, active, onActivate, onRemove }: { account: Accou
         <button onClick={onRemove} style={ghostBtn}>
           Remove
         </button>
+        {isMs && <SkinEditor account={account} onDone={onDone} />}
       </div>
     </GlassCard>
   );
@@ -153,6 +213,7 @@ export function Accounts() {
             key={a.id}
             account={a}
             active={a.id === activeId}
+            onDone={refresh}
             onActivate={() => setActive(a.id).catch((e) => setError(String(e)))}
             onRemove={() => {
               if (confirm(`Remove ${a.username}? ${a.accountType === "microsoft" ? "You'll need to sign in again to re-add it." : ""}`)) {
@@ -172,6 +233,16 @@ const ghostBtn = {
   borderRadius: "var(--radius-sm)",
   color: "var(--text-secondary)",
   padding: "6px 12px",
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const skinBtn = {
+  background: "transparent",
+  border: "1px solid var(--glass-border)",
+  borderRadius: "var(--radius-sm)",
+  color: "var(--text-secondary)",
+  padding: "6px 10px",
   fontSize: 12,
   cursor: "pointer",
 };

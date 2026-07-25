@@ -348,12 +348,14 @@ pub async fn launch_instance(
     // whichever was last touched). Its username + derived offline UUID go
     // straight into the game args. Offline mode uses a dummy access token and
     // userType "legacy" -- there's no real session to authenticate against.
+    // Per-instance account assignment: use the instance's assigned account if it
+    // still exists, otherwise fall back to the globally-active (most recent) one.
     let account = {
         let accounts = state.accounts.lock().unwrap();
-        accounts
-            .iter()
-            .max_by_key(|a| a.last_used)
-            .cloned()
+        instance
+            .account_id
+            .and_then(|id| accounts.iter().find(|a| a.id == id).cloned())
+            .or_else(|| accounts.iter().max_by_key(|a| a.last_used).cloned())
             .ok_or_else(|| "no account configured -- add one from the sign-in screen first".to_string())?
     };
 
@@ -383,24 +385,63 @@ pub async fn launch_instance(
         ),
     };
 
-    let game_args = vec![
-        "--username".to_string(),
-        mc_username,
-        "--version".to_string(),
-        instance.mc_version.clone(),
-        "--gameDir".to_string(),
-        dir.to_string_lossy().to_string(),
-        "--assetsDir".to_string(),
-        state.data_dir.join("assets").to_string_lossy().to_string(),
-        "--assetIndex".to_string(),
-        detail.asset_index.id.clone(),
-        "--uuid".to_string(),
-        mc_uuid,
-        "--accessToken".to_string(),
-        mc_access_token,
-        "--userType".to_string(),
-        user_type.to_string(),
-    ];
+    let game_dir_str = dir.to_string_lossy().to_string();
+    let assets_dir_str = assets_dir.to_string_lossy().to_string();
+    let user_type_str = user_type.to_string();
+
+    // Pre-1.13 versions ship a flat `minecraftArguments` string with `${token}`
+    // placeholders; 1.13+ ship the structured `arguments` object (for which our
+    // fixed modern arg set is equivalent for a vanilla client launch). Detect the
+    // legacy form and substitute tokens; otherwise use the modern args.
+    // (Note: very old versions also want a "virtual" assets layout, which the
+    // asset syncer doesn't build yet — that's the remaining pre-1.7 gap.)
+    let game_args = if let Some(legacy) = &detail.minecraft_arguments_legacy {
+        let subs: Vec<(&str, &str)> = vec![
+            ("auth_player_name", &mc_username),
+            ("version_name", &instance.mc_version),
+            ("game_directory", &game_dir_str),
+            ("assets_root", &assets_dir_str),
+            ("game_assets", &assets_dir_str),
+            ("assets_index_name", &detail.asset_index.id),
+            ("auth_uuid", &mc_uuid),
+            ("auth_access_token", &mc_access_token),
+            ("auth_session", &mc_access_token),
+            ("user_type", &user_type_str),
+            ("user_properties", "{}"),
+            ("version_type", "release"),
+            ("auth_xuid", ""),
+            ("clientid", ""),
+        ];
+        legacy
+            .split_whitespace()
+            .map(|tok| {
+                let mut s = tok.to_string();
+                for (k, v) in &subs {
+                    s = s.replace(&format!("${{{k}}}"), v);
+                }
+                s
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![
+            "--username".to_string(),
+            mc_username.clone(),
+            "--version".to_string(),
+            instance.mc_version.clone(),
+            "--gameDir".to_string(),
+            game_dir_str.clone(),
+            "--assetsDir".to_string(),
+            assets_dir_str.clone(),
+            "--assetIndex".to_string(),
+            detail.asset_index.id.clone(),
+            "--uuid".to_string(),
+            mc_uuid.clone(),
+            "--accessToken".to_string(),
+            mc_access_token.clone(),
+            "--userType".to_string(),
+            user_type_str.clone(),
+        ]
+    };
 
     let env_vars = if instance.env_vars_override.enabled {
         instance.env_vars_override.value.vars.clone()

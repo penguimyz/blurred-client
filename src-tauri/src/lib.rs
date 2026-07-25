@@ -65,6 +65,8 @@ pub fn run() {
             commands::modpacks::apply_modpack,
             commands::modpacks::export_modpack,
             commands::modpacks::import_modpack,
+            commands::modpacks::import_mrpack,
+            commands::modpacks::install_modrinth_modpack,
             commands::modpacks::reveal_path,
             commands::modrinth::modrinth_search,
             commands::modrinth::install_modrinth_mod,
@@ -79,6 +81,9 @@ pub fn run() {
             commands::auth::set_active_account,
             commands::online_auth::begin_msa_login,
             commands::online_auth::complete_msa_login,
+            commands::online_auth::set_account_skin,
+            commands::online_auth::reset_account_skin,
+            commands::update::check_launcher_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running blurred client");

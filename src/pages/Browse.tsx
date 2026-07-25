@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
-import { installModrinthMod, modrinthSearch, type ModrinthSearchResult } from "../lib/tauri";
+import {
+  installModrinthMod,
+  installModrinthModpack,
+  modrinthSearch,
+  type ModrinthSearchResult,
+} from "../lib/tauri";
 import { useInstanceStore } from "../store/instanceStore";
 
 // Mod browser (spec §5.3), Modrinth only — keyless public API. Search + install:
@@ -37,7 +42,7 @@ const MOD_CATEGORIES = [
   "social",
 ];
 
-export function Browse() {
+export function Browse({ onOpenInstance }: { onOpenInstance: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [projectType, setProjectType] = useState("mod");
   const [mcVersion, setMcVersion] = useState("");
@@ -84,6 +89,21 @@ export function Browse() {
 
   const toggleCategory = (c: string) =>
     setCategories((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]));
+
+  const [installingId, setInstallingId] = useState<string | null>(null);
+  async function installPack(hit: Hit) {
+    setInstallingId(hit.project_id);
+    setNotice(null);
+    try {
+      const inst = await installModrinthModpack(hit.project_id);
+      setNotice(`Installed "${hit.title}" as a new instance.`);
+      onOpenInstance(inst.id);
+    } catch (e) {
+      setNotice(String(e));
+    } finally {
+      setInstallingId(null);
+    }
+  }
 
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
@@ -224,8 +244,16 @@ export function Browse() {
                 <button onClick={() => setInstallFor(hit)} style={{ ...ghostBtn, cursor: "pointer" }}>
                   Install
                 </button>
+              ) : projectType === "modpack" ? (
+                <button
+                  onClick={() => installPack(hit)}
+                  disabled={installingId === hit.project_id}
+                  style={{ ...ghostBtn, cursor: "pointer" }}
+                >
+                  {installingId === hit.project_id ? "Installing…" : "Install"}
+                </button>
               ) : (
-                <button disabled title="Install currently supports mods only" style={{ ...ghostBtn, cursor: "not-allowed", opacity: 0.5 }}>
+                <button disabled title="Install supports mods and modpacks" style={{ ...ghostBtn, cursor: "not-allowed", opacity: 0.5 }}>
                   Install
                 </button>
               )}

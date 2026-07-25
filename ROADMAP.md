@@ -30,7 +30,7 @@ three months from now without remembering why:
 tech stack locked as above.
 
 ## Phase 1 — Core loop, no styling
-**Status: partially done.** What's actually wired:
+**Status: done — vanilla & Fabric launch end-to-end (verified live).** What's wired:
 - [x] Create instance (vanilla only) → writes `instance.json` to disk
 - [x] Fetch Mojang version manifest + per-version detail
 - [x] Download client jar + OS-filtered libraries
@@ -42,8 +42,11 @@ tech stack locked as above.
       concurrency, wired into `launch_instance` (streams progress to the Logs
       tab). Standard 1.7+ hashed layout only — legacy "virtual" assets not
       handled. Written against the documented schema, not yet run live.
-- [ ] Legacy `minecraftArguments` (pre-1.13) argument format — only the
-      modern structured `arguments` object is parsed so far.
+- [x] Legacy `minecraftArguments` (pre-1.13) argument format — `launch_instance`
+      detects the flat `minecraftArguments` string and does `${token}`
+      substitution (auth_player_name / game_directory / assets_root / etc.).
+      (Very old versions also want a "virtual" assets layout, which the asset
+      syncer still doesn't build — the remaining pre-1.7 gap.)
 - [x] macOS/Linux Java detection — implemented (`JAVA_HOME`, plus
       `/Library/Java/JavaVirtualMachines` on macOS and `/usr/lib/jvm` etc. on
       Linux). Not yet run against a real macOS/Linux box.
@@ -91,7 +94,7 @@ and see what breaks.
       pulls them in alongside the requested mod.
 
 ## Phase 4 — Modpacks
-**Status: offline half done.**
+**Status: done.**
 - [x] Create a reusable modpack from any instance's mod set
       (`create_modpack_from_instance`, copies the jars in so packs are
       self-contained).
@@ -100,9 +103,14 @@ and see what breaks.
 - [x] Share/export & import as a single self-contained `.bpack` file
       (JSON + base64'd jars; export reveals it in the file manager, import is
       drag-drop). Local, dependency-free — no zip crate added.
-- [ ] Browsing/importing packs from Modrinth listings — needs the live API.
-- [ ] Default "Blurred Essentials" pack — needs the download pipeline to
-      populate real mods.
+- [x] Browsing/importing packs from Modrinth listings — `install_modrinth_modpack`
+      (Browse → Install on a modpack) fetches the newest `.mrpack` and builds an
+      instance; `import_mrpack` does the same from a drag-dropped local `.mrpack`
+      (parses `modrinth.index.json`, downloads listed files, applies `overrides/`).
+      Uses the `zip` crate.
+- [x] Default "Blurred Essentials" pack — `BLURRED_ESSENTIALS` slug list +
+      `install_mods`; the New Instance modal offers it (Fabric), installs on
+      create. See Phase 3.
 
 ## Phase 5 — Java / Env Vars / Custom Commands (Prism parity)
 **Status: done.**
@@ -117,7 +125,7 @@ and see what breaks.
       `update_settings` / `update_instance`.
 
 ## Phase 6 — Accounts & the login gate
-**Status: offline + Microsoft sign-in, done and wired into launch.**
+**Status: done (offline + Microsoft, multi-account, per-instance assignment, skins).**
 
 Both account types are supported now. Microsoft/Xbox sign-in was re-added
 (`commands/online_auth.rs`) as the full device-code -> Xbox Live -> XSTS ->
@@ -150,16 +158,19 @@ contracts but NOT live-tested from the sandbox.
       (Microsoft or offline), switch active (`set_active_account` bumps
       `last_used`, which is how launch picks), remove (also clears the keychain
       entry). Skins shown from the Microsoft profile.
-- [ ] Per-instance account assignment (`Instance.account_id` exists in the model
-      but launch still uses the global active account).
-- [ ] Skin *management* (upload/change/library) — skins are displayed, not yet
-      editable.
+- [x] Per-instance account assignment — the instance Settings tab has a "Launch
+      as account" picker (`Instance.account_id`); `launch_instance` uses it when
+      set, falling back to the global active account.
+- [x] Skin management — the Accounts page can change a Microsoft account's skin
+      from a PNG URL (classic/slim) or reset it (`set_account_skin` /
+      `reset_account_skin` via the Minecraft Services API). A local-file skin
+      library is the remaining nicety.
 
 **Offline-mode limitation:** offline accounts can only join `online-mode=false`
 servers. Microsoft accounts can join online servers and Realms.
 
 ## Phase 7 — Logs viewer, playtime tracking, auto-update
-**Status: logs + playtime UI done; auto-update still open.**
+**Status: done (silent launcher auto-install is the only infra piece left).**
 - [x] Log event pipe (`instance-log` Tauri event, `onInstanceLog` in
       `src/lib/tauri.ts`)
 - [x] Playtime accumulation (`total_playtime_seconds` updated on process exit)
@@ -172,7 +183,11 @@ servers. Microsoft accounts can join online servers and Realms.
       loader; `update_mod` / `update_all_mods` swap the jar and update the
       ModRef, preserving enabled/pinned state. Surfaced in the Mods tab
       ("Check for updates" / per-row "Update" / "Update all"), respecting pins.
-- [ ] Launcher self-update — needs a release feed / network.
+- [x] Launcher self-update (check) — `check_launcher_update` queries the
+      configured GitHub repo's latest release (`update_repo` setting) and reports
+      whether a newer version is out, surfaced in Settings. Silent auto-install
+      (updater plugin + signed releases + hosted feed) is the remaining infra
+      piece — that needs published, signed releases to exist first.
 
 ---
 

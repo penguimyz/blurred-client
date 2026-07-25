@@ -14,4 +14,5 @@ export interface GlobalSettings {
   instanceStoragePath: string;
   updateCheckFrequencyMinutes: number;
   msaClientId: string; // Azure app (client) ID for Microsoft sign-in
+  updateRepo: string; // GitHub "owner/name" for launcher update checks ("" disables)
 }

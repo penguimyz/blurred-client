@@ -29,6 +29,11 @@ pub struct GlobalSettings {
     // files (written before this field) still load.
     #[serde(default = "default_msa_client_id")]
     pub msa_client_id: String,
+    // GitHub "owner/name" to check for launcher updates against; empty disables
+    // the check. Auto-install isn't wired (needs signed releases) — this powers
+    // the "check for updates" notice only.
+    #[serde(default)]
+    pub update_repo: String,
 }
 
 pub fn default_msa_client_id() -> String {
@@ -51,6 +56,7 @@ impl Default for GlobalSettings {
             instance_storage_path: String::new(), // resolved at runtime via `directories`
             update_check_frequency_minutes: 60,
             msa_client_id: default_msa_client_id(),
+            update_repo: String::new(),
         }
     }
 }

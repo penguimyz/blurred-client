@@ -179,6 +179,29 @@ export function importModpack(sourcePath: string): Promise<Modpack> {
   return invoke("import_modpack", { sourcePath });
 }
 
+/** Import a local Modrinth .mrpack file into a new instance. */
+export function importMrpack(sourcePath: string): Promise<Instance> {
+  return invoke("import_mrpack", { sourcePath });
+}
+
+/** Install a Modrinth modpack by project id/slug into a new instance. */
+export function installModrinthModpack(projectId: string): Promise<Instance> {
+  return invoke("install_modrinth_modpack", { projectId });
+}
+
+export interface UpdateStatus {
+  configured: boolean;
+  currentVersion: string;
+  latestVersion: string | null;
+  updateAvailable: boolean;
+  url: string | null;
+  notes: string | null;
+}
+
+export function checkLauncherUpdate(): Promise<UpdateStatus> {
+  return invoke("check_launcher_update");
+}
+
 export function revealPath(path: string): Promise<void> {
   return invoke("reveal_path", { path });
 }
@@ -292,6 +315,15 @@ export function removeAccount(accountId: string): Promise<void> {
 
 export function setActiveAccount(accountId: string): Promise<Account[]> {
   return invoke("set_active_account", { accountId });
+}
+
+/** Change a Microsoft account's skin to the PNG at `url` (variant classic/slim). */
+export function setAccountSkin(accountId: string, url: string, variant: string): Promise<Account> {
+  return invoke("set_account_skin", { accountId, url, variant });
+}
+
+export function resetAccountSkin(accountId: string): Promise<Account> {
+  return invoke("reset_account_skin", { accountId });
 }
 
 // ---- Microsoft (online) sign-in, device-code flow ----

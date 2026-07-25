@@ -4,7 +4,7 @@ import type { Modpack } from "../types/instance";
 import { useModpackStore } from "../store/modpackStore";
 import { useInstanceStore } from "../store/instanceStore";
 import { GlassCard } from "../components/GlassCard";
-import { applyModpack, exportModpack, revealPath } from "../lib/tauri";
+import { applyModpack, exportModpack, importMrpack, revealPath } from "../lib/tauri";
 import { formatDate } from "../lib/format";
 
 // Modpacks library (Phase 4, offline half — spec §5.4). Create a reusable pack
@@ -35,11 +35,18 @@ export function Modpacks({ onOpenInstance }: { onOpenInstance: (id: string) => v
         else if (event.payload.type === "leave") setDropHint(false);
         else if (event.payload.type === "drop") {
           setDropHint(false);
-          const packs = event.payload.paths.filter((p) => p.toLowerCase().endsWith(".bpack"));
-          for (const p of packs) {
+          for (const p of event.payload.paths) {
+            const lower = p.toLowerCase();
             try {
-              await importFrom(p);
-              setNotice("Imported modpack.");
+              if (lower.endsWith(".bpack")) {
+                await importFrom(p);
+                setNotice("Imported modpack into your library.");
+              } else if (lower.endsWith(".mrpack")) {
+                const inst = await importMrpack(p);
+                setNotice(`Imported "${inst.name}" as a new instance.`);
+                await refreshInstances();
+                onOpenInstance(inst.id);
+              }
             } catch (e) {
               setNotice(String(e));
             }
@@ -69,7 +76,9 @@ export function Modpacks({ onOpenInstance }: { onOpenInstance: (id: string) => v
         </button>
       </div>
       <div style={{ fontSize: 12, color: dropHint ? "var(--accent)" : "var(--text-secondary)", marginBottom: 24 }}>
-        {dropHint ? "Drop to import .bpack" : "Drag a .bpack file anywhere here to import a shared pack."}
+        {dropHint
+          ? "Drop to import"
+          : "Drag a .bpack (into your library) or a Modrinth .mrpack (into a new instance) anywhere here."}
       </div>
 
       {notice && (

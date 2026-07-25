@@ -389,6 +389,90 @@ pub struct LaunchCreds {
     pub access_token: String,
 }
 
+// ---- skin management (spec §8) ----
+
+const MC_SKINS_URL: &str = "https://api.minecraftservices.com/minecraft/profile/skins";
+const MC_ACTIVE_SKIN_URL: &str = "https://api.minecraftservices.com/minecraft/profile/skins/active";
+
+fn find_microsoft_account(state: &AppState, account_id: &str) -> Result<Account, String> {
+    state
+        .accounts
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|a| a.id.to_string() == account_id && a.account_type == AccountType::Microsoft)
+        .cloned()
+        .ok_or_else(|| "Microsoft account not found (skins only apply to Microsoft accounts)".to_string())
+}
+
+fn store_skin_url(state: &AppState, id: Uuid, skin_url: Option<String>) -> Result<Account, String> {
+    let mut accounts = state.accounts.lock().unwrap();
+    let acc = accounts
+        .iter_mut()
+        .find(|a| a.id == id)
+        .ok_or_else(|| "account no longer exists".to_string())?;
+    acc.skin_url = skin_url;
+    let updated = acc.clone();
+    let snapshot = accounts.clone();
+    drop(accounts);
+    crate::state::persist_accounts(&state.data_dir, &snapshot).map_err(|e| e.to_string())?;
+    Ok(updated)
+}
+
+/// Change the account's skin to the PNG at `url` (`variant` is "classic" or
+/// "slim"). Uses a fresh Minecraft token derived from the keychain refresh token.
+#[tauri::command]
+pub async fn set_account_skin(
+    state: State<'_, AppState>,
+    account_id: String,
+    url: String,
+    variant: String,
+) -> Result<Account, String> {
+    let client_id = client_id(&state);
+    let account = find_microsoft_account(&state, &account_id)?;
+    let token = authenticate_for_launch(&client_id, &account).await?.access_token;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(MC_SKINS_URL)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "variant": variant, "url": url }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("skin change was rejected ({}) — is the URL a public .png?", resp.status()));
+    }
+
+    let profile = fetch_profile(&client, &token).await?;
+    store_skin_url(&state, account.id, profile.skin_url)
+}
+
+/// Reset to the default (Steve/Alex) skin.
+#[tauri::command]
+pub async fn reset_account_skin(
+    state: State<'_, AppState>,
+    account_id: String,
+) -> Result<Account, String> {
+    let client_id = client_id(&state);
+    let account = find_microsoft_account(&state, &account_id)?;
+    let token = authenticate_for_launch(&client_id, &account).await?.access_token;
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .delete(MC_ACTIVE_SKIN_URL)
+        .bearer_auth(&token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("skin reset failed ({})", resp.status()));
+    }
+
+    let profile = fetch_profile(&client, &token).await?;
+    store_skin_url(&state, account.id, profile.skin_url)
+}
+
 /// Produce fresh launch credentials for a Microsoft account: refresh the MSA
 /// token from the keychain, re-run the chain, and return the live Minecraft
 /// access token + profile. Rotates and re-stores the refresh token if Microsoft

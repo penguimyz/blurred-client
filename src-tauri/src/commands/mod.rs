@@ -10,3 +10,4 @@ pub mod modrinth;
 pub mod mojang;
 pub mod online_auth;
 pub mod settings;
+pub mod update;
