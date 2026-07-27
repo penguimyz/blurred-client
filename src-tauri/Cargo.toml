@@ -1,6 +1,6 @@
 [package]
 name = "blurred-client"
-version = "0.1.0"
+version = "0.2.0"
 description = "A Minecraft launcher with Lunar-grade polish and Prism-grade control."
 authors = ["you"]
 edition = "2021"
