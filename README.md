@@ -65,34 +65,85 @@ identity. This is the deliberate design difference from launchers like TLauncher
 Accounts of either type are managed (add / switch / remove) from the **Accounts**
 tab.
 
-## Windows setup (this is the target platform for now)
+## Setup
 
-1. **Rust**: install via [rustup.rs](https://rustup.rs). Default stable
-   toolchain is fine.
-2. **Node**: v18+ (v22 was used to write this). `node --version` to check.
-3. **Tauri's native prerequisites** — you need the MSVC build tools and
-   WebView2:
-   - Microsoft C++ Build Tools: install via
-     [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/),
-     select "Desktop development with C++" during install.
-   - WebView2: pre-installed on Windows 11 and most up-to-date Windows 10.
-     If missing, Tauri's docs link the evergreen installer.
-   - Full checklist: https://v2.tauri.app/start/prerequisites/ (verify
-     this URL still matches current Tauri docs — v2 was fairly new when
-     this was written and the docs structure may have moved).
-4. From the repo root:
-   ```
-   npm install
-   npm run tauri dev
-   ```
-   (or `cargo tauri dev` from `src-tauri/` if you have `tauri-cli`
-   installed globally instead of via npm)
+Windows and Linux are both supported. macOS is not: the code paths are written
+and compile, but nothing has been built or run there.
+
+Common to both: **Rust** via [rustup.rs](https://rustup.rs) (stable), and
+**Node** v18+ (`node --version`). Full native-prerequisite checklist:
+https://v2.tauri.app/start/prerequisites/
+
+### Windows
+
+- **Microsoft C++ Build Tools**: install via
+  [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/),
+  select "Desktop development with C++" during install.
+- **WebView2**: pre-installed on Windows 11 and most up-to-date Windows 10.
+  If missing, Tauri's docs link the evergreen installer.
+
+### Linux
+
+Install the system libraries (`./scripts/build-linux.sh --deps` does this for
+apt/dnf/pacman, or by hand):
+
+```
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+                 librsvg2-dev libdbus-1-dev libssl-dev patchelf build-essential file
+```
+
+`webkit2gtk-4.1` is the one Tauri v2 needs — 4.0 is the v1 dependency and won't
+satisfy it, which puts the floor at roughly Ubuntu 22.04 / Debian 12 / Fedora 36.
+
+Two Linux runtime notes:
+
+- **The glass blur is Windows-only.** `window_vibrancy` has no Linux backend
+  because X11/Wayland expose no portable blur-behind — it's per-compositor. The
+  UI paints its own opaque backdrop there instead, so it looks correct, just
+  without the desktop showing through.
+- **Microsoft sign-in needs a keyring.** The MSA refresh token goes to the D-Bus
+  Secret Service, so a provider has to be running — `gnome-keyring` or KDE's
+  `kwallet` (with `kwallet-pam`). Without one, sign-in reports that it couldn't
+  reach the keyring. Offline accounts are unaffected.
+
+### Run it
+
+From the repo root:
+
+```
+npm install
+npm run tauri dev
+```
+
+(or `cargo tauri dev` from `src-tauri/` if you have `tauri-cli` installed
+globally instead of via npm)
+
+## Building
+
+`npm run tauri build` produces installers for whatever platform you're on —
+`.msi`/`.exe` on Windows, `.deb`/`.rpm`/`.AppImage` on Linux. There is no
+cross-compiling: a Linux bundle has to be built on Linux, because it links
+against that machine's GTK/WebKit stack.
+
+- **On Linux (or WSL):** `./scripts/build-linux.sh` installs the system
+  dependencies and runs the build.
+- **From anywhere:** push the branch and let
+  `.github/workflows/build-linux.yml` do it — it builds on `ubuntu-22.04` and
+  uploads the three bundles as workflow artifacts. Pushing a `v*` tag also
+  attaches them to a GitHub release, which is what the in-app update check
+  reads.
+
+Build on the oldest distro you intend to support: bundles link against the
+builder's glibc, so a build from a current distro fails to start on older ones
+with a `GLIBC_x.y not found` error. That's why CI pins 22.04 rather than
+`ubuntu-latest`.
 
 ## What happens on first run
 
 - A data directory gets created (via the `directories` crate — on Windows
-  that's `%APPDATA%\blurredclient\BlurredClient\`), containing
-  `settings.json` and an `instances/` folder.
+  that's `%APPDATA%\blurredclient\BlurredClient\`, on Linux
+  `~/.local/share/BlurredClient/`), containing `settings.json` and an
+  `instances/` folder.
 - The sign-in gate offers Microsoft sign-in or offline mode, and saves the
   account to `accounts.json` (Microsoft refresh tokens go to the OS keychain,
   not this file).
@@ -108,22 +159,20 @@ tab.
 
 ## If `list_detected_java` finds nothing
 
-The Windows JVM detection checks `JAVA_HOME`, common install roots
-(`C:\Program Files\Java`, Eclipse Adoptium/Temurin paths, etc.), and the
-registry. If you've got Java installed somewhere nonstandard, it won't be
-found yet — for now, open the generated `settings.json` and set
-`defaultJava.executablePath` to your `javaw.exe` path manually so you're
-not blocked on the detection logic while everything else gets built out.
+JVM detection (`src-tauri/src/commands/java.rs`) looks in:
 
-## Known gap: no icons
+- **Windows** — `JAVA_HOME`, common install roots (`C:\Program Files\Java`,
+  Eclipse Adoptium/Temurin, Microsoft, Zulu), and the `JavaSoft` registry keys.
+- **Linux / macOS** — `JAVA_HOME`, everything on `$PATH`, the distro roots
+  (`/usr/lib/jvm`, `/usr/lib64/jvm`, `/usr/java`, `/opt`, and macOS's
+  `JavaVirtualMachines`), and the per-user JDK managers (`~/.sdkman`,
+  `~/.jdks`, `~/.gradle/jdks`). Installs reachable under several names — the
+  usual `/usr/bin/java` → `/usr/lib/jvm/default-java` → real JDK chain — are
+  resolved and listed once.
 
-`src-tauri/icons/` is empty but `tauri.conf.json` references icon files in
-it. `npm run tauri dev` won't care. `tauri build` (producing an actual
-installer) will fail until you add them. Once you have a source PNG:
-```
-npx tauri icon path/to/source.png
-```
-generates the full platform icon set automatically.
+If your Java is somewhere none of that covers, open the generated
+`settings.json` and set `defaultJava.executablePath` by hand (`javaw.exe` on
+Windows, `bin/java` elsewhere).
 
 ## Project layout
 

@@ -69,8 +69,15 @@
   --radius-md: 12px;
   --radius-lg: 20px;
 
-  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, monospace;
+  /* Windows names first, then system-ui (which resolves to the desktop's own
+     UI font on Linux -- Cantarell on GNOME, Noto Sans elsewhere), then named
+     Linux fallbacks for the WebKitGTK builds that don't honour system-ui.
+     Without the tail of this list a Linux build falls back to a serif face and
+     the whole UI reads as a different product. */
+  --font-ui: "Segoe UI Variable", "Segoe UI", system-ui, "Cantarell", "Ubuntu",
+    "Noto Sans", "DejaVu Sans", sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, "Ubuntu Mono",
+    "DejaVu Sans Mono", "Liberation Mono", monospace;
 }
 
 * {

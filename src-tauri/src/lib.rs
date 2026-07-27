@@ -18,13 +18,20 @@ pub fn run() {
             let state = AppState::init().expect("failed to initialize app state -- check disk permissions on the data dir");
             app.manage(state);
 
+            // OS-level blur-behind for the glass theme. Without it,
+            // `transparent: true` in tauri.conf.json just gives you a
+            // see-through window with no blur -- the CSS backdrop-filter only
+            // blurs content within the webview, not whatever's behind the
+            // window on the user's desktop.
+            //
+            // Windows-only on purpose: `window_vibrancy` has no Linux backend
+            // (X11/Wayland expose no portable blur-behind; it's per-compositor,
+            // e.g. KWin's blur or Hyprland's layer rules, and only the user can
+            // enable it). On Linux the app is still translucent-capable but
+            // paints the opaque `--backdrop-gradient` from theme.css instead,
+            // which is why it looks correct rather than empty there.
             #[cfg(target_os = "windows")]
             {
-                // This is the actual OS-level blur-behind for the glass theme.
-                // Without this, `transparent: true` in tauri.conf.json just
-                // gives you a see-through window with no blur -- the CSS
-                // backdrop-filter only blurs content within the webview, not
-                // whatever's behind the window on the user's desktop.
                 let window = app.get_webview_window("main").unwrap();
                 if let Err(e) = window_vibrancy::apply_acrylic(&window, Some((18, 18, 22, 125))) {
                     tracing::warn!("acrylic effect failed, falling back to flat translucent bg: {e}");

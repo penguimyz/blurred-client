@@ -1,13 +1,13 @@
 // JVM auto-detection and process launching.
 //
-// Windows-first per the current build target. macOS/Linux detection paths
-// are stubbed with TODOs -- do NOT ship those platforms without filling
-// them in, the common install locations are genuinely different
-// (/Library/Java/JavaVirtualMachines on macOS, /usr/lib/jvm on most Linux
-// distros) and this will silently find zero JVMs there right now.
+// Two detection backends: Windows walks Program Files + the JavaSoft registry
+// keys, everything else (Linux/macOS) walks the well-known install roots plus
+// $PATH. They differ enough in where JVMs live -- and in the executable name
+// (`javaw.exe` vs `java`) -- that a shared implementation would be mostly cfg
+// branches anyway.
 
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
 use tauri::{AppHandle, Emitter};
@@ -95,39 +95,61 @@ fn winreg_probe() -> anyhow::Result<Vec<DetectedJava>> {
 
 #[cfg(not(target_os = "windows"))]
 pub fn detect_installed_javas() -> Vec<DetectedJava> {
+    use std::collections::HashSet;
+
     let mut found = Vec::new();
+    let mut seen: HashSet<PathBuf> = HashSet::new();
 
     // JAVA_HOME first, same as the Windows path.
     if let Ok(home) = std::env::var("JAVA_HOME") {
-        let exe = PathBuf::from(&home).join("bin").join("java");
-        if exe.exists() {
-            found.push(probe_java(&exe));
+        consider_java(&PathBuf::from(&home).join("bin").join("java"), &mut found, &mut seen);
+    }
+
+    // Anything already on $PATH. This is what catches the setups that don't
+    // use a predictable install root at all -- Nix, Homebrew, asdf/mise shims,
+    // SDKMAN's `current` symlink, or a hand-rolled tarball the user PATH'd.
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            consider_java(&dir.join("java"), &mut found, &mut seen);
         }
     }
 
-    // Common install roots. macOS keeps JVMs in versioned bundles under
-    // JavaVirtualMachines; most Linux distros drop them in /usr/lib/jvm.
-    // The `bin/java` we look for is the same on both.
-    let roots: &[&str] = if cfg!(target_os = "macos") {
-        &[
-            "/Library/Java/JavaVirtualMachines",
-            "/System/Library/Java/JavaVirtualMachines",
-        ]
+    // Directories whose *children* are individual JVM installs. macOS keeps
+    // JVMs in versioned bundles under JavaVirtualMachines; Linux distros use
+    // /usr/lib/jvm (Debian/Ubuntu/Fedora/Arch) or /usr/lib64/jvm (openSUSE).
+    let mut roots: Vec<PathBuf> = if cfg!(target_os = "macos") {
+        ["/Library/Java/JavaVirtualMachines", "/System/Library/Java/JavaVirtualMachines"]
+            .iter()
+            .map(PathBuf::from)
+            .collect()
     } else {
-        &["/usr/lib/jvm", "/usr/lib64/jvm", "/opt/java", "/opt"]
+        ["/usr/lib/jvm", "/usr/lib64/jvm", "/usr/java", "/opt/java", "/opt"]
+            .iter()
+            .map(PathBuf::from)
+            .collect()
     };
+    // Per-user JDK managers. Common enough on Linux dev machines that skipping
+    // them means "no Java found" on a box that has five of them installed.
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        roots.push(home.join(".sdkman/candidates/java")); // SDKMAN
+        roots.push(home.join(".jdks")); // JetBrains Toolbox / IntelliJ
+        roots.push(home.join(".gradle/jdks")); // Gradle toolchain auto-provisioning
+    }
 
-    for root in roots {
+    for root in &roots {
         let Ok(entries) = std::fs::read_dir(root) else { continue };
         for entry in entries.flatten() {
-            // macOS nests the runtime under Contents/Home; Linux is flat.
+            // macOS nests the runtime under Contents/Home; Linux is usually
+            // flat, except older JDK 8 packages that keep it under jre/.
+            let dir = entry.path();
             let candidates = [
-                entry.path().join("Contents").join("Home").join("bin").join("java"),
-                entry.path().join("bin").join("java"),
+                dir.join("Contents/Home/bin/java"),
+                dir.join("bin/java"),
+                dir.join("jre/bin/java"),
             ];
             for exe in candidates {
-                if exe.exists() {
-                    found.push(probe_java(&exe));
+                if exe.is_file() {
+                    consider_java(&exe, &mut found, &mut seen);
                     break;
                 }
             }
@@ -135,11 +157,28 @@ pub fn detect_installed_javas() -> Vec<DetectedJava> {
     }
 
     found.sort_by(|a, b| a.path.cmp(&b.path));
-    found.dedup_by(|a, b| a.path == b.path);
     found
 }
 
-fn probe_java(exe: &PathBuf) -> DetectedJava {
+/// Probe `exe` and record it, unless it's a JVM we've already got. Dedup is by
+/// *resolved* path: on Linux a single JDK is typically reachable through
+/// several names at once (`/usr/lib/jvm/default-java`,
+/// `/usr/lib/jvm/java-21-openjdk-amd64`, and `/usr/bin/java` are all one
+/// install), and listing it three times in the Java picker is just noise.
+/// The unresolved path is what gets shown, since it's the recognizable one.
+#[cfg(not(target_os = "windows"))]
+fn consider_java(exe: &Path, found: &mut Vec<DetectedJava>, seen: &mut std::collections::HashSet<PathBuf>) {
+    if !exe.is_file() {
+        return;
+    }
+    let key = std::fs::canonicalize(exe).unwrap_or_else(|_| exe.to_path_buf());
+    if !seen.insert(key) {
+        return;
+    }
+    found.push(probe_java(exe));
+}
+
+fn probe_java(exe: &Path) -> DetectedJava {
     let output = std::process::Command::new(exe)
         .arg("-version")
         .output();
@@ -245,9 +284,10 @@ pub async fn launch_and_stream(
     Ok(status.code().unwrap_or(-1))
 }
 
-/// Builds the classpath string, Windows-style (`;`-separated). Non-Windows
-/// needs `:` instead -- see the cfg branch. Don't forget this if you copy
-/// this function while adding macOS/Linux support.
+/// Builds the classpath string with the platform's separator: `;` on Windows,
+/// `:` everywhere else. Always go through this rather than joining by hand --
+/// a `;`-joined classpath on Linux is read as one absurdly long path and the
+/// game dies on a NoClassDefFoundError that points nowhere useful.
 pub fn build_classpath(jar_paths: &[PathBuf]) -> String {
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
     jar_paths

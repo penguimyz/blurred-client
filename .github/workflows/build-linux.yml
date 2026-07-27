@@ -1,0 +1,82 @@
+name: Build (Linux)
+
+# Produces the Linux artifacts: .deb, .rpm and .AppImage.
+#
+# Runs on ubuntu-22.04 rather than ubuntu-latest on purpose. The bundled
+# binaries link against the builder's glibc, so building on the oldest image
+# that still ships webkit2gtk-4.1 (which Tauri v2 requires) is what keeps the
+# output runnable on non-bleeding-edge distros. Build on 24.04 and the result
+# refuses to start on Ubuntu 22.04 / Debian 12 with a GLIBC_2.38 error.
+
+# Builds every branch, not just main: a Linux bundle can't be built or tested
+# on a Windows dev machine, so CI is the only place breakage shows up and it
+# should show up before the merge, not after.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tauri's Linux system dependencies. libdbus-1-dev is not in Tauri's
+      # published list but is required here: tao pulls in the `dbus` crate,
+      # which links libdbus at build time.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            patchelf \
+            build-essential \
+            file \
+            wget
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run tauri build
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          find src-tauri/target/release/bundle \
+            \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+            -exec cp {} out/ \;
+          ls -lh out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blurred-client-linux
+          path: out/*
+          if-no-files-found: error
+
+      # Tag builds also become a GitHub release, which is what the in-app
+      # update check (commands/update.rs) reads to decide a newer build exists.
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*

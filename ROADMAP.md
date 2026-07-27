@@ -47,9 +47,30 @@ tech stack locked as above.
       substitution (auth_player_name / game_directory / assets_root / etc.).
       (Very old versions also want a "virtual" assets layout, which the asset
       syncer still doesn't build — the remaining pre-1.7 gap.)
-- [x] macOS/Linux Java detection — implemented (`JAVA_HOME`, plus
-      `/Library/Java/JavaVirtualMachines` on macOS and `/usr/lib/jvm` etc. on
-      Linux). Not yet run against a real macOS/Linux box.
+- [x] macOS/Linux Java detection — implemented: `JAVA_HOME`, `$PATH`, the
+      distro/vendor roots (`/usr/lib/jvm`, `/usr/lib64/jvm`, `/usr/java`,
+      `/opt`, macOS's `JavaVirtualMachines`) and the per-user JDK managers
+      (`~/.sdkman`, `~/.jdks`, `~/.gradle/jdks`), deduped by resolved path so
+      one JDK reachable under several symlinks lists once.
+
+### Linux support
+
+**Status: built, not yet run on a real Linux box.** What landed:
+
+- [x] Java detection reworked for Linux layouts (above).
+- [x] `WEBKIT_DISABLE_DMABUF_RENDERER=1` set before webview init (`main.rs`) —
+      without it WebKitGTK 2.42+ renders a blank window on several driver
+      stacks, Nvidia proprietary especially.
+- [x] Keychain failures explain themselves (`online_auth.rs`): the Linux
+      backend is the D-Bus Secret Service, which is absent on minimal desktops.
+- [x] `bundle.linux` deb/rpm dependencies in `tauri.conf.json`, including
+      `xdg-utils` — `open_in_file_manager` execs `xdg-open` directly.
+- [x] Font stack falls back to the desktop's UI font instead of a serif face.
+- [x] Build pipeline: `.github/workflows/build-linux.yml` (ubuntu-22.04 →
+      deb/rpm/AppImage) and `scripts/build-linux.sh` for local/WSL builds.
+
+Not done: the glass blur-behind (no portable Linux equivalent — see README),
+and no Linux machine has run the result yet.
 
 **This has not been run against live Mojang/Modrinth endpoints** — this
 sandbox's network is allowlisted to package registries only, not

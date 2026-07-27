@@ -1,0 +1,7 @@
+# This repo is developed on Windows but builds on Linux in CI. Anything the
+# Linux side executes or parses must stay LF: a shell script checked out with
+# CRLF dies with "bad interpreter: /usr/bin/env bash^M", which reads like a
+# missing-bash problem rather than a line-ending one.
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

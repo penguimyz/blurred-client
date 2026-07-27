@@ -37,17 +37,36 @@ const KEYRING_SERVICE: &str = "dev.blurredclient.app";
 // ---- keychain ----
 
 fn keyring_entry(account_id: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, account_id).map_err(|e| e.to_string())
+    keyring::Entry::new(KEYRING_SERVICE, account_id).map_err(keychain_error)
+}
+
+/// Turn a keychain failure into something the user can act on. This matters
+/// most on Linux, where the backend is the D-Bus Secret Service — which simply
+/// isn't running on a minimal desktop or a fresh tiling-WM setup. The raw error
+/// there is a D-Bus name-resolution failure that reads like a launcher bug
+/// rather than "install a keyring daemon".
+fn keychain_error(e: keyring::Error) -> String {
+    #[cfg(target_os = "linux")]
+    {
+        return format!(
+            "couldn't reach the system keyring ({e}). Blurred Client keeps your Microsoft \
+             session in the D-Bus Secret Service — install and start a provider \
+             (gnome-keyring, or KDE's kwallet with kwallet-pam) and sign in again."
+        );
+    }
+    #[cfg(not(target_os = "linux"))]
+    format!("couldn't reach the system keyring ({e})")
 }
 
 fn store_refresh_token(account_id: &str, token: &str) -> Result<(), String> {
-    keyring_entry(account_id)?.set_password(token).map_err(|e| e.to_string())
+    keyring_entry(account_id)?.set_password(token).map_err(keychain_error)
 }
 
 fn read_refresh_token(account_id: &str) -> Result<String, String> {
-    keyring_entry(account_id)?
-        .get_password()
-        .map_err(|_| "no stored Microsoft session — sign in again".to_string())
+    keyring_entry(account_id)?.get_password().map_err(|e| match e {
+        keyring::Error::NoEntry => "no stored Microsoft session — sign in again".to_string(),
+        other => keychain_error(other),
+    })
 }
 
 /// Best-effort keychain cleanup when an account is removed.
