@@ -21,6 +21,12 @@ jobs:
   build:
     runs-on: ubuntu-22.04
 
+    # Needed by the release step on tag builds. Repos created under GitHub's
+    # current defaults give GITHUB_TOKEN read-only contents access, which fails
+    # the release upload with a 403 only at the very end of a ~15 minute build.
+    permissions:
+      contents: write
+
     steps:
       - uses: actions/checkout@v4
 
