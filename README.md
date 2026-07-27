@@ -67,8 +67,10 @@ tab.
 
 ## Setup
 
-Windows and Linux are both supported. macOS is not: the code paths are written
-and compile, but nothing has been built or run there.
+Windows and Linux are both supported and both confirmed working on real
+hardware (Linux verified on Linux Mint: Java auto-detection and Microsoft
+sign-in both work unassisted). macOS is not supported: the code paths are
+written and compile, but nothing has been built or run there.
 
 Common to both: **Rust** via [rustup.rs](https://rustup.rs) (stable), and
 **Node** v18+ (`node --version`). Full native-prerequisite checklist:
@@ -142,8 +144,10 @@ with a `GLIBC_x.y not found` error. That's why CI pins 22.04 rather than
 
 - A data directory gets created (via the `directories` crate — on Windows
   that's `%APPDATA%\blurredclient\BlurredClient\`, on Linux
-  `~/.local/share/BlurredClient/`), containing `settings.json` and an
-  `instances/` folder.
+  `~/.local/share/blurredclient/`, or `$XDG_DATA_HOME/blurredclient` if set),
+  containing `settings.json` and an `instances/` folder. The Linux name is
+  lowercase and drops the qualifier/organization — that's `directories`
+  applying the XDG convention, not a typo.
 - The sign-in gate offers Microsoft sign-in or offline mode, and saves the
   account to `accounts.json` (Microsoft refresh tokens go to the OS keychain,
   not this file).

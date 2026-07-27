@@ -2,7 +2,8 @@
 name = "blurred-client"
 version = "0.2.0"
 description = "A Minecraft launcher with Lunar-grade polish and Prism-grade control."
-authors = ["you"]
+# Becomes the Maintainer field of the .deb/.rpm, so it ships to users.
+authors = ["penguimyz <penguimyz@users.noreply.github.com>"]
 edition = "2021"
 rust-version = "1.77"
 

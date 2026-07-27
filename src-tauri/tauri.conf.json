@@ -43,12 +43,7 @@
     ],
     "linux": {
       "deb": {
-        "depends": [
-          "libwebkit2gtk-4.1-0",
-          "libgtk-3-0",
-          "libdbus-1-3",
-          "xdg-utils"
-        ]
+        "depends": ["libdbus-1-3", "xdg-utils"]
       },
       "rpm": {
         "depends": ["webkit2gtk4.1", "gtk3", "dbus-libs", "xdg-utils"]

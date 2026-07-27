@@ -55,7 +55,13 @@ tech stack locked as above.
 
 ### Linux support
 
-**Status: built, not yet run on a real Linux box.** What landed:
+**Status: shipped and confirmed working** — v0.2.0 ran on Linux Mint (2015
+laptop, Intel integrated graphics). Java auto-detection found the system JVM
+unassisted, and Microsoft sign-in completed, so the Secret Service keychain path
+works on a stock Mint install. Framerate is hardware-bound (~40 fps there); the
+launcher isn't in the render path once the JVM is spawned.
+
+What landed:
 
 - [x] Java detection reworked for Linux layouts (above).
 - [x] `WEBKIT_DISABLE_DMABUF_RENDERER=1` set before webview init (`main.rs`) —
@@ -69,8 +75,7 @@ tech stack locked as above.
 - [x] Build pipeline: `.github/workflows/build-linux.yml` (ubuntu-22.04 →
       deb/rpm/AppImage) and `scripts/build-linux.sh` for local/WSL builds.
 
-Not done: the glass blur-behind (no portable Linux equivalent — see README),
-and no Linux machine has run the result yet.
+Not done: the glass blur-behind (no portable Linux equivalent — see README).
 
 **This has not been run against live Mojang/Modrinth endpoints** — this
 sandbox's network is allowlisted to package registries only, not
