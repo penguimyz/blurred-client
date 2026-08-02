@@ -12,6 +12,18 @@ import type {
 } from "../types/instance";
 import type { GlobalSettings } from "../types/settings";
 import type { Account, DeviceCodeInfo } from "../types/account";
+import type {
+  ChatMessage,
+  ChatNamesEvent,
+  ChatPresenceEvent,
+  ChatStatus,
+  ChatStatusEvent,
+  Friend,
+  FriendsChangedEvent,
+} from "../types/chat";
+import type { CrashReport } from "../types/crash";
+import type { Cape } from "../types/cape";
+import type { Server, ServerStatus } from "../types/server";
 
 // One function per #[tauri::command]. Keeps invoke() string literals and
 // their argument shapes in exactly one place instead of scattered through
@@ -294,6 +306,202 @@ export async function onInstanceLog(
       cb(event.payload.line, event.payload.stream);
     }
   });
+}
+
+// ---- chat (Sonar / IRC) ----
+
+export function chatStatus(): Promise<ChatStatus> {
+  return invoke("chat_status");
+}
+
+/** Open the chat connection under `nick` (normally the active MC username). */
+export function chatConnect(nick: string): Promise<void> {
+  return invoke("chat_connect", { nick });
+}
+
+export function chatDisconnect(): Promise<void> {
+  return invoke("chat_disconnect");
+}
+
+export function chatSend(conversation: string, text: string): Promise<void> {
+  return invoke("chat_send", { conversation, text });
+}
+
+export function chatJoin(channel: string): Promise<void> {
+  return invoke("chat_join", { channel });
+}
+
+export function chatPart(channel: string): Promise<void> {
+  return invoke("chat_part", { channel });
+}
+
+/** Ask the server to re-send a channel's member roster. */
+export function chatNames(channel: string): Promise<void> {
+  return invoke("chat_names", { channel });
+}
+
+export function listFriends(): Promise<Friend[]> {
+  return invoke("list_friends");
+}
+
+/** Send a friend request. Needs a live connection — the request is a message. */
+export function addFriend(nick: string, note: string): Promise<Friend[]> {
+  return invoke("add_friend", { nick, note });
+}
+
+export function acceptFriend(nick: string): Promise<Friend[]> {
+  return invoke("accept_friend", { nick });
+}
+
+export function declineFriend(nick: string): Promise<Friend[]> {
+  return invoke("decline_friend", { nick });
+}
+
+export function removeFriend(nick: string): Promise<Friend[]> {
+  return invoke("remove_friend", { nick });
+}
+
+/** Fires when an incoming request/accept/decline changed the friends list. */
+export function onFriendsChanged(cb: (e: FriendsChangedEvent) => void): Promise<UnlistenFn> {
+  return listen<FriendsChangedEvent>("friends-changed", (e) => cb(e.payload));
+}
+
+export function onChatMessage(cb: (m: ChatMessage) => void): Promise<UnlistenFn> {
+  return listen<ChatMessage>("chat-message", (e) => cb(e.payload));
+}
+
+export function onChatStatus(cb: (s: ChatStatusEvent) => void): Promise<UnlistenFn> {
+  return listen<ChatStatusEvent>("chat-status", (e) => cb(e.payload));
+}
+
+export function onChatPresence(cb: (p: ChatPresenceEvent) => void): Promise<UnlistenFn> {
+  return listen<ChatPresenceEvent>("chat-presence", (e) => cb(e.payload));
+}
+
+export function onChatNames(cb: (n: ChatNamesEvent) => void): Promise<UnlistenFn> {
+  return listen<ChatNamesEvent>("chat-names", (e) => cb(e.payload));
+}
+
+// ---- hosted servers ----
+
+export function listServers(): Promise<Server[]> {
+  return invoke("list_servers");
+}
+
+export function createServer(
+  name: string,
+  mcVersion: string,
+  loader: Loader,
+  port: number
+): Promise<Server> {
+  return invoke("create_server", { name, mcVersion, loader, port });
+}
+
+export function updateServer(server: Server): Promise<Server> {
+  return invoke("update_server", { server });
+}
+
+export function deleteServer(id: string): Promise<void> {
+  return invoke("delete_server", { id });
+}
+
+export function openServerFolder(id: string): Promise<void> {
+  return invoke("open_server_folder", { id });
+}
+
+/** Accept the Minecraft EULA for a server. Required before it will start. */
+export function acceptEula(id: string): Promise<Server> {
+  return invoke("accept_eula", { id });
+}
+
+export function startServer(id: string): Promise<void> {
+  return invoke("start_server", { id });
+}
+
+/** Clean shutdown via the console `stop` command, so the world is saved. */
+export function stopServer(id: string): Promise<void> {
+  return invoke("stop_server", { id });
+}
+
+export function killServer(id: string): Promise<void> {
+  return invoke("kill_server", { id });
+}
+
+export function serverCommand(id: string, command: string): Promise<void> {
+  return invoke("server_command", { id, command });
+}
+
+export function serverStatuses(): Promise<ServerStatus[]> {
+  return invoke("server_statuses");
+}
+
+export function onServerLog(
+  cb: (serverId: string, line: string) => void
+): Promise<UnlistenFn> {
+  return listen<{ serverId: string; line: string }>("server-log", (e) =>
+    cb(e.payload.serverId, e.payload.line)
+  );
+}
+
+export function onServerReady(cb: (serverId: string) => void): Promise<UnlistenFn> {
+  return listen<string>("server-ready", (e) => cb(e.payload));
+}
+
+export function onServerStopped(
+  cb: (serverId: string, exitCode: number) => void
+): Promise<UnlistenFn> {
+  return listen<{ serverId: string; exitCode: number }>("server-stopped", (e) =>
+    cb(e.payload.serverId, e.payload.exitCode)
+  );
+}
+
+// ---- capes ----
+
+export function listCapes(): Promise<Cape[]> {
+  return invoke("list_capes");
+}
+
+/** Save a cape from the maker. `data` is a bare base64 PNG, no data-URL prefix. */
+export function saveCape(name: string, data: string): Promise<Cape[]> {
+  return invoke("save_cape", { name, data });
+}
+
+export function deleteCape(id: string): Promise<Cape[]> {
+  return invoke("delete_cape", { id });
+}
+
+/** Read a cape's PNG back as base64, for editing or preview. */
+export function readCape(id: string): Promise<string> {
+  return invoke("read_cape", { id });
+}
+
+/** Wear a cape, or pass null to take it off. Announces to other players. */
+export function setActiveCape(id: string | null): Promise<void> {
+  return invoke("set_active_cape", { id });
+}
+
+// ---- crash reports ----
+
+export function listCrashReports(): Promise<CrashReport[]> {
+  return invoke("list_crash_reports");
+}
+
+export function deleteCrashReport(id: string): Promise<void> {
+  return invoke("delete_crash_report", { id });
+}
+
+export function clearCrashReports(): Promise<void> {
+  return invoke("clear_crash_reports");
+}
+
+/** Read a full session log off disk (trimmed to the last 2 MB). */
+export function readSessionLog(path: string): Promise<string> {
+  return invoke("read_session_log", { path });
+}
+
+/** Fires the moment a game process exits non-zero, with the saved report. */
+export function onInstanceCrashed(cb: (r: CrashReport) => void): Promise<UnlistenFn> {
+  return listen<CrashReport>("instance-crashed", (e) => cb(e.payload));
 }
 
 // ---- accounts (offline) ----

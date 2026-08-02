@@ -1,73 +1,161 @@
 /*
-  Glass theme tokens. Every component (GlassCard, DataTable, MonoField,
-  everything else) should read from these vars, never hardcode a blur
-  radius or border color directly -- that's how the Lunar surface layer
-  and the Prism depth layer stay visually one product while differing in
-  density (see Section 2.1 of the spec).
+  Ocean theme tokens.
 
-  Note on backdrop-filter reliability: this has historically been the
-  weakest on Windows/WebView2 for compositing performance. If you see
-  stutter on instance-switch or panel-open animations once this is
-  running for real, the fallback is --glass-blur: none with a slightly
-  higher --glass-bg opacity to compensate visually.
+  The client reads as a submarine console looking out into deep water. Three
+  ideas carry it, and every component should express them through these vars
+  rather than hardcoding a color or blur:
+
+    1. DEPTH. The palette is a water column, not a flat background. Dark theme
+       sits in the abyssal zone (near-black blue-green); light theme sits in the
+       shallows (sunlit turquoise). --backdrop-gradient is a vertical descent,
+       so panels higher on screen feel nearer the surface.
+    2. BIOLUMINESCENCE. The only saturated color is emitted light -- the accent
+       cyan, the running-instance pulse, the online dot. Everything else is
+       water. That's why the accent reads as bright without being loud.
+    3. GLASS AS PORTHOLE. Panels are viewports into the water behind them, so
+       they keep a bright top edge (--glass-sheen) the way wet glass catches
+       light from above.
+
+  Note on backdrop-filter reliability: this has historically been the weakest
+  on Windows/WebView2 for compositing performance. If you see stutter on
+  instance-switch or panel-open animations once this is running for real, the
+  fallback is --glass-blur: none with a slightly higher --glass-bg opacity to
+  compensate visually.
 */
+
+/*
+  Pixel display face, used for UI chrome only (see fonts/README.md for why body
+  copy stays on the sans stack). Vendored rather than CDN-loaded: the app runs
+  offline. `font-display: block` avoids a flash of the fallback at a completely
+  different metric — Silkscreen is much wider per character than the sans, so a
+  swap would visibly reflow every button and heading.
+*/
+@font-face {
+  font-family: "Silkscreen";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./fonts/silkscreen-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Silkscreen";
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src: url("./fonts/silkscreen-700.woff2") format("woff2");
+}
 
 :root,
 [data-theme="dark"] {
-  --glass-bg: rgba(24, 24, 30, 0.55);
-  --glass-bg-elevated: rgba(32, 32, 40, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.08);
-  --glass-blur: 20px;
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+  /*
+    Tells the engine every built-in control is on a dark surface. This is the
+    single most load-bearing line for the native chrome we can't style
+    directly: without it WebView2 paints white scrollbars, a white <select>
+    drop-down popup, and white date/number spinners regardless of our CSS,
+    because those are OS-drawn rather than DOM-drawn.
+  */
+  color-scheme: dark;
 
-  --text-primary: rgba(255, 255, 255, 0.92);
-  --text-secondary: rgba(255, 255, 255, 0.6);
-  --text-tertiary: rgba(255, 255, 255, 0.38);
+  /* Abyssal zone. Blue-green rather than blue-purple -- deep water loses red
+     first, so the darkest values keep a green cast. */
+  --glass-bg: rgba(9, 24, 34, 0.62);
+  --glass-bg-elevated: rgba(14, 34, 47, 0.74);
+  --glass-border: rgba(125, 226, 240, 0.11);
+  --glass-sheen: rgba(160, 240, 255, 0.14);
+  --glass-blur: 22px;
+  --glass-shadow: 0 10px 40px rgba(0, 12, 20, 0.5);
 
-  --accent: #7c9cff; /* user-tintable at runtime, see setAccentColor() */
-  --accent-fg: #0b0d1a;
+  --text-primary: rgba(224, 248, 255, 0.94);
+  --text-secondary: rgba(180, 216, 230, 0.62);
+  --text-tertiary: rgba(150, 190, 206, 0.4);
 
-  --success: #4ade80;
-  --warning: #fbbf24;
-  --danger: #f87171;
+  /* Bioluminescent cyan. Still user-tintable at runtime via setAccentColor(). */
+  --accent: #35e0d0;
+  --accent-fg: #002028;
+  --accent-glow: rgba(53, 224, 208, 0.35);
 
-  --backdrop-gradient: radial-gradient(
-    circle at 20% 20%,
-    #2a2440,
-    #14141c 60%
+  --success: #45e6a8;
+  --warning: #ffc75a;
+  --danger: #ff6b81;
+
+  /* The water column: light filtering down from a distant surface into black. */
+  --backdrop-gradient: linear-gradient(
+    180deg,
+    #0d3346 0%,
+    #072536 28%,
+    #041824 58%,
+    #010d15 100%
+  );
+
+  --hero-gradient: linear-gradient(
+    135deg,
+    rgba(20, 78, 100, 0.75),
+    rgba(6, 30, 45, 0.85)
   );
 }
 
 [data-theme="light"] {
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-elevated: rgba(255, 255, 255, 0.75);
-  --glass-border: rgba(0, 0, 0, 0.06);
-  --glass-blur: 20px;
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+  color-scheme: light;
 
-  --text-primary: rgba(20, 20, 24, 0.92);
-  --text-secondary: rgba(20, 20, 24, 0.6);
-  --text-tertiary: rgba(20, 20, 24, 0.38);
+  /* Sunlit shallows: pale turquoise over white sand. */
+  --glass-bg: rgba(238, 253, 255, 0.66);
+  --glass-bg-elevated: rgba(248, 255, 255, 0.82);
+  --glass-border: rgba(10, 90, 110, 0.12);
+  --glass-sheen: rgba(255, 255, 255, 0.75);
+  --glass-blur: 22px;
+  --glass-shadow: 0 10px 36px rgba(10, 70, 90, 0.16);
 
-  --accent: #4c6fff;
+  --text-primary: rgba(6, 38, 50, 0.94);
+  --text-secondary: rgba(8, 60, 76, 0.62);
+  --text-tertiary: rgba(10, 70, 88, 0.42);
+
+  --accent: #0aa5a0;
   --accent-fg: #ffffff;
+  --accent-glow: rgba(10, 165, 160, 0.28);
 
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
+  --success: #0d9668;
+  --warning: #c2760a;
+  --danger: #dc4257;
 
-  --backdrop-gradient: radial-gradient(
-    circle at 20% 20%,
-    #f0f0ff,
-    #e4e4f0 60%
+  --backdrop-gradient: linear-gradient(
+    180deg,
+    #d8f6fb 0%,
+    #b6e8f2 40%,
+    #93d8e8 100%
+  );
+
+  --hero-gradient: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.8),
+    rgba(178, 232, 242, 0.75)
   );
 }
 
-/* Radius scale, per spec 12-20px range */
+/*
+  Radius scale.
+
+  Pixel-art pass: everything is square. Rounded corners are the single loudest
+  "modern web app" signal there is, and no amount of pixel font survives them.
+  The scale is kept as three separate vars rather than collapsed to one because
+  components reference them by intent (--radius-sm on inputs, --radius-lg on
+  cards), and keeping the distinction means a future theme can reintroduce
+  rounding without touching a hundred call sites.
+*/
 :root {
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 20px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+
+  /* Border weight. 2px reads as "one pixel at 2x scale", which is the whole
+     grammar of a pixel UI. */
+  --edge: 2px;
+  /* Hard shadow offset — no blur, ever. A blurred shadow is the other big
+     giveaway; pixel art casts a solid offset block. */
+  --drop: 4px;
+
+  --rail-width: 68px;
+  --titlebar-height: 34px;
 
   /* Windows names first, then system-ui (which resolves to the desktop's own
      UI font on Linux -- Cantarell on GNOME, Noto Sans elsewhere), then named
@@ -78,6 +166,10 @@
     "Noto Sans", "DejaVu Sans", sans-serif;
   --font-mono: "Cascadia Code", "JetBrains Mono", ui-monospace, "Ubuntu Mono",
     "DejaVu Sans Mono", "Liberation Mono", monospace;
+
+  /* Display face for UI chrome. Falls back to the mono stack, which at least
+     keeps the fixed-width rhythm if the woff2 ever fails to load. */
+  --font-pixel: "Silkscreen", "Cascadia Code", ui-monospace, monospace;
 }
 
 * {
@@ -99,20 +191,143 @@ body {
   overflow: hidden; /* custom titlebar app, no native chrome scroll */
 }
 
-/* Surface layer: the glossy, big-card, minimal-text component. */
+/*
+  Pixel-art typography.
+
+  Silkscreen is applied to chrome — headings, buttons, labels, nav, tags — and
+  deliberately NOT to body copy, chat, log output or anything monospaced. It's a
+  display face with no lowercase descenders to speak of; a paragraph of it is
+  unreadable, and chat is the one place in this app where reading speed matters
+  most.
+
+  `-webkit-font-smoothing: none` is what keeps the glyphs crisp. Antialiasing a
+  bitmap face just blurs the pixel grid it's built on, which defeats the point.
+*/
+h1,
+h2,
+h3,
+h4,
+button,
+label,
+.pixel,
+.rail-btn::after,
+.titlebar-title {
+  font-family: var(--font-pixel);
+  -webkit-font-smoothing: none;
+  font-smooth: never;
+  letter-spacing: 0.02em;
+}
+
+/* Silkscreen has no true bold at small sizes — the 700 face is a separate
+   weight, so let it be used rather than synthesised. */
+h1,
+h2,
+h3 {
+  font-weight: 400;
+}
+
+/* Images are pixel sources (skins, mod icons, capes) — never smooth them. */
+img {
+  image-rendering: pixelated;
+}
+
+/*
+  Scrollbars styled as thin light shafts. WebView2 and WebKitGTK both honour
+  the ::-webkit- form; the standard `scrollbar-color` covers Firefox-based
+  builds should one ever exist.
+*/
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--glass-border) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Square thumb, no rounding — the scrollbar is chrome like everything else. */
+::-webkit-scrollbar-thumb {
+  background: rgba(125, 226, 240, 0.18);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(125, 226, 240, 0.32);
+  background-clip: content-box;
+}
+
+/*
+  Surface layer: the big-card component.
+
+  Pixel-art pass — square, a chunky border, and a hard offset shadow instead of
+  the soft one. The blur stays (the product is called Blurred, and it's what
+  keeps the water visible behind the panel) but it's now framed by hard edges,
+  which is what makes the two languages sit together instead of fighting.
+
+  Transitions are stepped rather than eased: `steps(4)` makes a hover move in
+  four discrete jumps, so even the motion is quantised.
+*/
 .glass-card {
+  position: relative;
   background: var(--glass-bg);
   backdrop-filter: blur(var(--glass-blur));
   -webkit-backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--glass-border);
+  border: var(--edge) solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--glass-shadow);
-  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1),
-    background 220ms ease;
+  box-shadow: var(--drop) var(--drop) 0 rgba(0, 10, 18, 0.45);
+  transition: transform 120ms steps(4), background 160ms ease,
+    border-color 160ms ease, box-shadow 120ms steps(4);
 }
 
+/*
+  Dither texture. A 2px checker at very low alpha, which at 100% zoom lands
+  exactly on the pixel grid and reads as the stippled shading pixel art uses for
+  gradients. Kept under the content and non-interactive.
+*/
+.glass-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-conic-gradient(
+    rgba(125, 226, 240, 0.045) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 4px 4px;
+}
+
+/*
+  Wet-glass top edge. A 1px bright line along the top only, fading out at the
+  corners -- the cue that reads as "light from above hitting a curved surface".
+  Pointer-events off so it never eats a click on a clickable card.
+*/
+.glass-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--glass-sheen) 25%,
+    var(--glass-sheen) 75%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* Lift and let the shadow grow, like a sprite being raised off the board. */
 .glass-card:hover {
-  transform: translateY(-2px);
+  transform: translate(-2px, -2px);
+  border-color: rgba(125, 226, 240, 0.28);
+  box-shadow: calc(var(--drop) + 2px) calc(var(--drop) + 2px) 0 rgba(0, 10, 18, 0.5);
 }
 
 /* Depth layer: dense, technical, monospace-for-exact-values screens. */
@@ -121,6 +336,15 @@ body {
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   font-size: 13px;
+  /*
+    A border-radius on a <table> does not clip its cells -- the corner cells'
+    own backgrounds and borders paint straight over the rounded edge, so the
+    table reads as square no matter what radius is set. `separate` + zero
+    spacing keeps the cell borders while letting overflow do the clipping.
+  */
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
 }
 
 .data-table th,
@@ -130,9 +354,31 @@ body {
   border-bottom: 1px solid var(--glass-border);
 }
 
+/* No bottom rule on the last row, or it cuts across the rounded corner. */
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+/*
+  Blanket rounding for the elements that default to square. These are the ones
+  that kept slipping through per-component styling -- log blocks, screenshots,
+  mod icons -- because each is styled in a different file.
+*/
+pre,
+code,
+img,
+video,
+canvas.rounded {
+  border-radius: var(--radius-sm);
+}
+
+pre {
+  overflow: auto;
+}
+
 .mono-field {
   font-family: var(--font-mono);
-  background: rgba(0, 0, 0, 0.25);
+  background: rgba(0, 20, 30, 0.35);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   padding: 6px 10px;
@@ -140,29 +386,196 @@ body {
   font-size: 12.5px;
 }
 
+/*
+  Buttons.
+
+  The pixel-art move here is the press: the button carries a hard offset shadow
+  at rest, and on :active it translates by exactly that offset while the shadow
+  collapses to zero. The result is a control that physically sinks into the
+  page — the single most recognisable interaction in a pixel UI, and it costs
+  two rules.
+*/
 button.accent {
   background: var(--accent);
   color: var(--accent-fg);
-  border: none;
+  border: var(--edge) solid rgba(0, 32, 40, 0.55);
   border-radius: var(--radius-sm);
   padding: 8px 16px;
-  font-weight: 600;
+  font-weight: 400;
+  font-size: 12px;
+  text-transform: uppercase;
   cursor: pointer;
-  transition: filter 150ms ease;
+  box-shadow: var(--drop) var(--drop) 0 rgba(0, 10, 18, 0.5);
+  transition: filter 120ms steps(3), transform 60ms steps(2),
+    box-shadow 60ms steps(2);
 }
 
 button.accent:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.12);
+}
+
+button.accent:active:not(:disabled) {
+  transform: translate(var(--drop), var(--drop));
+  box-shadow: 0 0 0 rgba(0, 10, 18, 0.5);
 }
 
 button.accent:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
+  box-shadow: none;
+  filter: saturate(0.4);
+}
+
+/* Neutral/secondary button, used anywhere a plain <button> appears. */
+button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare) {
+  background: rgba(125, 226, 240, 0.08);
+  color: var(--text-secondary);
+  border: var(--edge) solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--drop) var(--drop) 0 rgba(0, 10, 18, 0.35);
+  transition: background 120ms steps(3), color 120ms steps(3),
+    transform 60ms steps(2), box-shadow 60ms steps(2);
+}
+
+button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):hover {
+  background: rgba(125, 226, 240, 0.16);
+  color: var(--text-primary);
+}
+
+button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):active:not(:disabled) {
+  transform: translate(var(--drop), var(--drop));
+  box-shadow: 0 0 0 rgba(0, 10, 18, 0.35);
+}
+
+button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 /*
-  Custom window chrome (see components/TitleBar.tsx). Fixed 32px strip across
-  the top; the app content reserves this space. Transparent background so the
+  Selects.
+
+  Two halves, and only one of them is really ours:
+
+  1. The CLOSED control. `appearance: none` strips the platform look so the
+     border/background/radius match every other field, and the chevron is drawn
+     as an inline-SVG background (a data URI, not an <img>, so it needs no
+     network and no extra element). The right padding reserves its space.
+     The stroke color is baked into the URI per theme -- `currentColor` does
+     not resolve inside a background-image.
+
+  2. The OPEN drop-down popup. That list is drawn by the OS, not the DOM, so
+     CSS reaches almost none of it. `color-scheme` above is what actually makes
+     it dark; the `option` rules below are the small part that does apply, and
+     they matter on WebKitGTK (Linux), where options otherwise inherit a white
+     system background.
+*/
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  /* Set here rather than relying on each call site's inline style, so a select
+     matches the rest of the chrome even when handed a style object that omits
+     these. */
+  border-radius: var(--radius-sm);
+  border: var(--edge) solid var(--glass-border);
+  box-shadow: inset 2px 2px 0 rgba(0, 10, 18, 0.35);
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  background-color: rgba(0, 20, 30, 0.4);
+  /*
+    !important on the arrow and its padding is deliberate. Several screens pass
+    a shared inline style object to both inputs and selects, and an inline
+    `background:` *shorthand* resets background-image to none -- which, combined
+    with `appearance: none` above, would leave a select with no arrow at all.
+    Those call sites now set `backgroundColor` instead, but this keeps a future
+    one from silently losing the chevron again.
+  */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2396c4d2' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  padding-right: 30px !important;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+[data-theme="light"] select {
+  background-color: rgba(255, 255, 255, 0.6);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230a5a6e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+select option {
+  background: #0b2230;
+  color: #e0f8ff;
+}
+
+[data-theme="light"] select option {
+  background: #ffffff;
+  color: #06262f;
+}
+
+/* Match text inputs and textareas to the same surface as selects. */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
+input:not([type]),
+textarea {
+  background-color: rgba(0, 20, 30, 0.4);
+  color: var(--text-primary);
+  border: var(--edge) solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  /* Inset shadow instead of a drop shadow: fields read as carved into the
+     panel while buttons sit on top of it. */
+  box-shadow: inset 2px 2px 0 rgba(0, 10, 18, 0.35);
+}
+
+[data-theme="light"] input[type="text"],
+[data-theme="light"] input[type="number"],
+[data-theme="light"] input[type="search"],
+[data-theme="light"] input[type="url"],
+[data-theme="light"] input:not([type]),
+[data-theme="light"] textarea {
+  background-color: rgba(255, 255, 255, 0.6);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Checkboxes and the accent-colored bits of range inputs. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/*
+  Custom window chrome (see components/TitleBar.tsx). Fixed strip across the
+  top; the app content reserves this space. Transparent background so the
   frosted backdrop shows through — the buttons only appear on hover.
 */
 .titlebar {
@@ -170,7 +583,7 @@ button.accent:disabled {
   top: 0;
   left: 0;
   right: 0;
-  height: 32px;
+  height: var(--titlebar-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -180,11 +593,15 @@ button.accent:disabled {
 }
 
 .titlebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding-left: 14px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-tertiary);
-  line-height: 32px;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  line-height: var(--titlebar-height);
   flex: 1;
 }
 
@@ -195,7 +612,7 @@ button.accent:disabled {
 
 .tb-btn {
   width: 46px;
-  height: 32px;
+  height: var(--titlebar-height);
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -207,7 +624,7 @@ button.accent:disabled {
 }
 
 .tb-btn:hover {
-  background: var(--glass-bg-elevated);
+  background: rgba(125, 226, 240, 0.1);
   color: var(--text-primary);
 }
 
@@ -217,10 +634,142 @@ button.accent:disabled {
 }
 
 /*
-  Dynamic backdrop (spec §2.2): soft, slowly-drifting color blobs behind the
-  glass, iOS-Control-Center style. The surface layer (Home) sits on the full
-  animation; it's the same gradient tokens as --backdrop-gradient so light/dark
-  stay consistent. Honors prefers-reduced-motion by holding still.
+  ============================================================
+  Navigation rail (components/Sidebar.tsx)
+  ============================================================
+  Narrow icon rail in the Lunar shape. The active item is marked by a glowing
+  vertical bar on the left edge rather than a filled background, so the rail
+  stays quiet while still being legible at a glance.
+*/
+.rail {
+  width: var(--rail-width);
+  height: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 0 12px;
+  background: rgba(4, 18, 27, 0.5);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border-right: 1px solid var(--glass-border);
+  /*
+    Both of these are required for the hover tooltips to sit on top of the page.
+
+    `backdrop-filter` already makes the rail a stacking context, which traps the
+    tooltip's own z-index INSIDE the rail -- so no value on .rail-btn::after can
+    lift it above the content area, because that comparison never happens at the
+    page level. The rail as a whole has to win instead, which needs an explicit
+    z-index (and a position for it to apply to).
+
+    Without this the tooltip is painted first and the page content, later in DOM
+    order, covers it.
+  */
+  position: relative;
+  z-index: 20;
+}
+
+[data-theme="light"] .rail {
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.rail-btn {
+  position: relative;
+  width: 46px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.rail-btn:hover {
+  color: var(--text-primary);
+  background: rgba(125, 226, 240, 0.08);
+}
+
+.rail-btn.active {
+  color: var(--accent);
+}
+
+/* The active marker — a solid block, square, no glow bleed. */
+.rail-btn.active::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 20px;
+  background: var(--accent);
+}
+
+/* Tooltip that slides out of the rail on hover. */
+.rail-btn::after {
+  content: attr(data-label);
+  position: absolute;
+  left: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%) translateX(-4px);
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--glass-bg-elevated);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: var(--edge) solid var(--glass-border);
+  box-shadow: 3px 3px 0 rgba(0, 10, 18, 0.45);
+  color: var(--text-primary);
+  font-size: 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms steps(2), transform 100ms steps(2);
+  z-index: 50;
+}
+
+.rail-btn:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+/* Unread/notification pip on a rail icon. */
+.rail-pip {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  min-width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border: 1px solid rgba(0, 20, 30, 0.7);
+}
+
+.rail-spacer {
+  flex: 1;
+}
+
+.rail-divider {
+  width: 26px;
+  height: 1px;
+  background: var(--glass-border);
+  margin: 6px 0;
+}
+
+/*
+  ============================================================
+  Dynamic backdrop (spec §2.2) -- the water column
+  ============================================================
+  Three layers, all pure CSS so they cost nothing on the JS side:
+    .backdrop-blob  - slow drifting currents of colored light
+    .backdrop-rays  - god rays angling down from the surface
+    .backdrop-motes - marine snow, the fine particulate drifting upward
+  All hold still under prefers-reduced-motion.
 */
 .backdrop {
   position: fixed;
@@ -230,40 +779,194 @@ button.accent:disabled {
   background: var(--backdrop-gradient);
 }
 
+/*
+  Pixel water.
+
+  A smooth vertical gradient is the wrong idiom for pixel art — real pixel
+  scenes step the water column in bands and dither the seams between them.
+  This does both with two stacked layers and no images:
+
+    .backdrop-bands  hard-stopped colour bands (no interpolation between stops,
+                     which is what `X 40%, Y 40%` achieves) so depth reads as
+                     discrete zones rather than a smooth fade.
+    .backdrop-dither a 4px checker over the band edges, standing in for the
+                     stippled transition pixel art uses instead of a blend.
+*/
+.backdrop-bands {
+  position: absolute;
+  inset: 0;
+  /* Slightly transparent so the drifting currents underneath still tint the
+     bands — fully opaque would hide them entirely and the water would go dead. */
+  opacity: 0.85;
+  background: linear-gradient(
+    180deg,
+    #17506b 0%, #17506b 12%,
+    #0f3d55 12%, #0f3d55 26%,
+    #0a2f43 26%, #0a2f43 42%,
+    #072433 42%, #072433 58%,
+    #051a26 58%, #051a26 74%,
+    #03121b 74%, #03121b 88%,
+    #010a10 88%, #010a10 100%
+  );
+}
+
+[data-theme="light"] .backdrop-bands {
+  background: linear-gradient(
+    180deg,
+    #e4fbff 0%, #e4fbff 12%,
+    #cdf2fa 12%, #cdf2fa 26%,
+    #b6e8f4 26%, #b6e8f4 42%,
+    #9eddec 42%, #9eddec 58%,
+    #88d1e4 58%, #88d1e4 74%,
+    #73c5db 74%, #73c5db 88%,
+    #61b9d2 88%, #61b9d2 100%
+  );
+}
+
+/* Dither the band seams so the steps read as stipple rather than as banding. */
+.backdrop-dither {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image: repeating-conic-gradient(
+    rgba(255, 255, 255, 0.05) 0% 25%,
+    transparent 0% 50%
+  );
+  background-size: 4px 4px;
+}
+
+/*
+  Drifting currents. Kept blurred and soft on purpose: these sit *behind* the
+  banded water as a slow colour wash, and the bands + dither in front are what
+  carry the pixel look. Sharpening these too would just add noise.
+*/
 .backdrop-blob {
   position: absolute;
   width: 55vw;
   height: 55vw;
   border-radius: 50%;
-  filter: blur(80px);
+  filter: blur(90px);
   opacity: 0.5;
   will-change: transform;
 }
 
 .backdrop-blob.b1 {
-  top: -15%;
+  top: -18%;
   left: -10%;
-  background: var(--accent);
-  opacity: 0.28;
+  background: #1fb6c9;
+  opacity: 0.22;
   animation: drift1 26s ease-in-out infinite alternate;
 }
 
 .backdrop-blob.b2 {
-  bottom: -20%;
-  right: -10%;
-  background: #a855f7;
-  opacity: 0.22;
+  bottom: -22%;
+  right: -12%;
+  background: #0f5f8a;
+  opacity: 0.3;
   animation: drift2 32s ease-in-out infinite alternate;
 }
 
 .backdrop-blob.b3 {
-  top: 30%;
-  right: 20%;
+  top: 26%;
+  right: 18%;
   width: 35vw;
   height: 35vw;
-  background: #22d3ee;
-  opacity: 0.16;
+  background: #35e0d0;
+  opacity: 0.12;
   animation: drift3 38s ease-in-out infinite alternate;
+}
+
+/*
+  God rays. Repeating hard-edged gradient, skewed and heavily blurred, anchored
+  above the viewport so the rays fan down from an unseen surface. `mix-blend-mode:
+  screen` keeps them additive over the blobs instead of washing them out.
+*/
+.backdrop-rays {
+  position: absolute;
+  top: -40%;
+  left: -30%;
+  width: 160%;
+  height: 130%;
+  transform: rotate(14deg);
+  transform-origin: top center;
+  mix-blend-mode: screen;
+  opacity: 0.5;
+  /* Hard-edged shafts, no blur — a god ray in pixel art is a solid slab of
+     lighter water, not a soft glow. */
+  background: repeating-linear-gradient(
+    98deg,
+    transparent 0px,
+    transparent 58px,
+    rgba(150, 240, 255, 0.07) 60px,
+    rgba(150, 240, 255, 0.07) 76px,
+    transparent 76px,
+    transparent 170px
+  );
+  animation: sway 19s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+[data-theme="light"] .backdrop-rays {
+  opacity: 0.75;
+  background: repeating-linear-gradient(
+    98deg,
+    transparent 0px,
+    transparent 58px,
+    rgba(255, 255, 255, 0.28) 60px,
+    rgba(255, 255, 255, 0.5) 74px,
+    rgba(255, 255, 255, 0.24) 88px,
+    transparent 92px,
+    transparent 170px
+  );
+}
+
+/*
+  Marine snow. Two layers of radial-gradient dots at different sizes/speeds
+  give parallax without a single DOM node per particle. The layer is 200% tall
+  and translates up by half its height, so the loop is seamless.
+*/
+.backdrop-motes {
+  position: absolute;
+  inset: 0;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.backdrop-motes::before,
+.backdrop-motes::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 200%;
+  background-repeat: repeat;
+  will-change: transform;
+}
+
+.backdrop-motes::before {
+  top: 0;
+  background-image: radial-gradient(
+    circle at center,
+    rgba(190, 245, 255, 0.5) 0.6px,
+    transparent 1.4px
+  );
+  background-size: 130px 130px;
+  animation: rise 44s linear infinite;
+}
+
+.backdrop-motes::after {
+  top: 0;
+  background-image: radial-gradient(
+    circle at center,
+    rgba(210, 250, 255, 0.32) 1px,
+    transparent 2.2px
+  );
+  background-size: 230px 210px;
+  animation: rise 72s linear infinite;
+}
+
+[data-theme="light"] .backdrop-motes {
+  opacity: 0.3;
 }
 
 @keyframes drift1 {
@@ -278,9 +981,156 @@ button.accent:disabled {
   from { transform: translate(0, 0); }
   to { transform: translate(-8vw, 10vh); }
 }
+@keyframes sway {
+  from { transform: rotate(11deg) translateX(-2vw); }
+  to { transform: rotate(17deg) translateX(3vw); }
+}
+@keyframes rise {
+  from { transform: translateY(0); }
+  to { transform: translateY(-50%); }
+}
+
+/*
+  Sonar ping: the slow expanding ring used on the running-instance dot and the
+  connected state in chat. Two rings offset in time read as a repeating sweep.
+*/
+/* Square block + expanding square ring, stepped so the sweep ticks outward in
+   discrete rings rather than gliding. */
+.ping {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  background: var(--success);
+}
+
+.ping::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--success);
+  animation: ping-out 2.4s steps(5) infinite;
+}
+
+@keyframes ping-out {
+  0% { transform: scale(1); opacity: 0.9; }
+  80%, 100% { transform: scale(3); opacity: 0; }
+}
+
+/*
+  ============================================================
+  Chat (pages/Chat.tsx)
+  ============================================================
+*/
+.chat-row {
+  display: flex;
+  gap: 10px;
+  padding: 5px 14px;
+  line-height: 1.45;
+  font-size: 13.5px;
+  transition: background 120ms ease;
+}
+
+.chat-row:hover {
+  background: rgba(125, 226, 240, 0.045);
+}
+
+/* A message from the local user gets a faint accent gutter. */
+.chat-row.self {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Server notices / joins / parts: quieter, italic, no author column. */
+.chat-row.system {
+  color: var(--text-tertiary);
+  font-size: 12.5px;
+  font-style: italic;
+}
+
+/* A message that mentions the local user's nick. */
+.chat-row.mention {
+  background: rgba(53, 224, 208, 0.09);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.chat-author {
+  flex-shrink: 0;
+  font-weight: 600;
+  min-width: 92px;
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-body {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+  color: var(--text-primary);
+}
+
+.chat-time {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-row:hover .chat-time {
+  opacity: 1;
+}
+
+/* Conversation / friend list entry. */
+.chat-entry {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.chat-entry:hover {
+  background: rgba(125, 226, 240, 0.08);
+  color: var(--text-primary);
+}
+
+.chat-entry.active {
+  background: rgba(53, 224, 208, 0.13);
+  color: var(--text-primary);
+}
+
+/* Presence block on a friend row. Square, with a hard outline instead of a
+   glow — a soft halo is the one thing pixel art never has. */
+.presence {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  background: var(--text-tertiary);
+  border: 1px solid rgba(0, 20, 30, 0.6);
+}
+
+.presence.online {
+  background: var(--success);
+}
 
 @media (prefers-reduced-motion: reduce) {
-  .backdrop-blob {
+  .backdrop-blob,
+  .backdrop-rays,
+  .backdrop-motes::before,
+  .backdrop-motes::after,
+  .ping::after {
     animation: none !important;
   }
 }

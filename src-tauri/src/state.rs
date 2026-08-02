@@ -5,6 +5,10 @@ use std::sync::Mutex;
 use directories::ProjectDirs;
 use tokio::sync::oneshot;
 
+use crate::commands::bridge::BridgeState;
+use crate::commands::capes::CapeState;
+use crate::commands::servers::ServerState;
+use crate::commands::chat::ChatState;
 use crate::models::account::Account;
 use crate::models::settings::GlobalSettings;
 
@@ -20,6 +24,20 @@ pub struct AppState {
     /// this map is also how the frontend-facing "is it running" question is
     /// answered (see `list_running`).
     pub running: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// Live IRC chat connection (see `commands::chat`). Empty until the user
+    /// connects; the socket itself lives in a background task, and this holds
+    /// only the outbound channel plus enough bookkeeping to answer "are we
+    /// connected, and as whom".
+    pub chat: Mutex<ChatState>,
+    /// Loopback socket the in-game Blurred mod connects to (see
+    /// `commands::bridge`). Not behind a Mutex: the port and token are fixed
+    /// for the process lifetime and the broadcast sender is already shareable.
+    pub bridge: BridgeState,
+    /// Custom capes: our library's active pick, plus everyone else's capes
+    /// received over IRC (see `commands::capes`).
+    pub capes: CapeState,
+    /// Minecraft servers hosted from the launcher (see `commands::servers`).
+    pub servers: ServerState,
 }
 
 impl AppState {
@@ -34,7 +52,13 @@ impl AppState {
         let settings_path = data_dir.join("settings.json");
         let settings = if settings_path.exists() {
             let raw = std::fs::read_to_string(&settings_path)?;
-            serde_json::from_str(&raw).unwrap_or_default()
+            let mut s: GlobalSettings = serde_json::from_str(&raw).unwrap_or_default();
+            // One-time accent migration onto the ocean palette. See
+            // LEGACY_DEFAULT_ACCENT for why this is safe to do silently.
+            if s.accent_color.eq_ignore_ascii_case(crate::models::settings::LEGACY_DEFAULT_ACCENT) {
+                s.accent_color = crate::models::settings::DEFAULT_ACCENT.to_string();
+            }
+            s
         } else {
             let s = GlobalSettings {
                 instance_storage_path: instances_dir.to_string_lossy().to_string(),
@@ -58,6 +82,10 @@ impl AppState {
             settings: Mutex::new(settings),
             accounts: Mutex::new(accounts),
             running: Mutex::new(HashMap::new()),
+            chat: Mutex::new(ChatState::default()),
+            bridge: BridgeState::default(),
+            capes: CapeState::default(),
+            servers: ServerState::default(),
         })
     }
 

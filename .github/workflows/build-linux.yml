@@ -48,6 +48,30 @@ jobs:
             file \
             wget
 
+      # The companion Fabric mod is bundled into the app as a Tauri resource
+      # (src-tauri/resources/blurred.jar). Rebuild it here rather than trusting
+      # the committed copy, so a release can never ship a jar that lags the
+      # source it was built from.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      # Stonecutter builds every Minecraft version in the tree from one source
+      # pass, so this produces the full set of per-version jars.
+      - name: Build companion mod (all Minecraft versions)
+        run: |
+          cd mod
+          chmod +x gradlew
+          ./gradlew build --no-daemon
+          mkdir -p ../src-tauri/resources/mod
+          for dir in versions/*/; do
+            v=$(basename "$dir")
+            jar=$(find "$dir/build/libs" -name '*.jar' ! -name '*sources*' | head -1)
+            cp "$jar" "../src-tauri/resources/mod/blurred-$v.jar"
+          done
+          ls -la ../src-tauri/resources/mod/
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20

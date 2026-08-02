@@ -1,0 +1,54 @@
+/*
+  Per-version build script.
+
+  Stonecutter runs this once for each entry under `versions/`, so `project.`
+  properties here resolve against that version's own `gradle.properties`
+  (yarn_mappings, fabric_version) layered over the shared one at the root.
+
+  The Minecraft version is NOT read from a property — it comes from the
+  Stonecutter node, so the directory name and the version being compiled can
+  never disagree.
+*/
+plugins {
+    id 'fabric-loom' version '1.17.17'
+    id 'dev.kikugie.stonecutter'
+}
+
+def mcVersion = stonecutter.current.version
+
+version = "${project.mod_version}+mc${mcVersion}"
+group = project.maven_group
+
+base {
+    // One jar per version, named so a release can carry them all.
+    archivesName = "${project.archives_base_name}-${mcVersion}"
+}
+
+// No `constants` block needed: `//? if >=1.21.9` compares against this node's
+// own version, which Stonecutter already knows from the tree.
+
+dependencies {
+    minecraft "com.mojang:minecraft:${mcVersion}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'mcVersion', mcVersion
+    filesMatching('fabric.mod.json') {
+        expand version: project.version, mcVersion: mcVersion
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // 1.21 runs on Java 21; anything lower won't load.
+    it.options.release = 21
+    it.options.encoding = 'UTF-8'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}

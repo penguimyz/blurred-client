@@ -4,6 +4,8 @@ import type { Modpack } from "../types/instance";
 import { useModpackStore } from "../store/modpackStore";
 import { useInstanceStore } from "../store/instanceStore";
 import { GlassCard } from "../components/GlassCard";
+import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import { applyModpack, exportModpack, importMrpack, revealPath } from "../lib/tauri";
 import { formatDate } from "../lib/format";
 
@@ -70,12 +72,16 @@ export function Modpacks({ onOpenInstance }: { onOpenInstance: (id: string) => v
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Modpacks</h1>
-        <button className="accent" onClick={() => setShowCreate(true)} disabled={instances.length === 0}>
-          + Create from instance
-        </button>
+        <PageHeader
+          page="modpacks"
+          actions={
+            <button className="accent" onClick={() => setShowCreate(true)} disabled={instances.length === 0}>
+              Create from instance
+            </button>
+          }
+        />
       </div>
-      <div style={{ fontSize: 12, color: dropHint ? "var(--accent)" : "var(--text-secondary)", marginBottom: 24 }}>
+      <div style={{ fontSize: 12, color: dropHint ? "var(--accent)" : "var(--text-tertiary)", marginBottom: 20 }}>
         {dropHint
           ? "Drop to import"
           : "Drag a .bpack (into your library) or a Modrinth .mrpack (into a new instance) anywhere here."}
@@ -94,10 +100,27 @@ export function Modpacks({ onOpenInstance }: { onOpenInstance: (id: string) => v
       {error && <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
       {!loading && modpacks.length === 0 ? (
-        <GlassCard style={{ textAlign: "center", padding: 48 }}>
-          <p style={{ color: "var(--text-secondary)" }}>
-            No modpacks yet. Create one from an instance's mod set, or drop a shared .bpack here.
+        <GlassCard style={{ textAlign: "center", padding: 48, maxWidth: 620 }}>
+          <Icon name="crate" size={32} style={{ color: "var(--text-tertiary)", marginBottom: 12 }} />
+          <p style={{ color: "var(--text-secondary)", margin: "0 0 18px" }}>
+            No modpacks yet. A modpack is a snapshot of one instance's mod set that
+            you can re-apply or hand to someone else.
           </p>
+          <div style={{ display: "flex", gap: 10, justifyContent: "center", flexWrap: "wrap" }}>
+            <button
+              className="accent"
+              onClick={() => setShowCreate(true)}
+              disabled={instances.length === 0}
+              title={instances.length === 0 ? "Create an instance first" : undefined}
+            >
+              Snapshot an instance
+            </button>
+          </div>
+          <div style={{ fontSize: 11.5, color: "var(--text-tertiary)", marginTop: 16, lineHeight: 1.6 }}>
+            You can also drop a <strong>.bpack</strong> here to add it to your library,
+            or a Modrinth <strong>.mrpack</strong> to install it straight into a new
+            instance. Browse → Modpacks installs them from Modrinth directly.
+          </div>
         </GlassCard>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 16 }}>
@@ -109,6 +132,37 @@ export function Modpacks({ onOpenInstance }: { onOpenInstance: (id: string) => v
               </div>
               {p.description && (
                 <div style={{ fontSize: 12, color: "var(--text-tertiary)", marginBottom: 8 }}>{p.description}</div>
+              )}
+              {/* First few mod names, so a pack is identifiable without opening
+                  it — "23 mods" alone tells you nothing about which pack it is. */}
+              {p.mods.length > 0 && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+                  {p.mods.slice(0, 4).map((m) => (
+                    <span
+                      key={m.filename}
+                      title={m.filename}
+                      style={{
+                        fontSize: 10,
+                        padding: "2px 7px",
+                        borderRadius: 0,
+                        background: "rgba(125,226,240,0.1)",
+                        border: "1px solid var(--glass-border)",
+                        color: "var(--text-secondary)",
+                        maxWidth: 110,
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {m.name}
+                    </span>
+                  ))}
+                  {p.mods.length > 4 && (
+                    <span style={{ fontSize: 10, color: "var(--text-tertiary)", padding: "2px 4px" }}>
+                      +{p.mods.length - 4} more
+                    </span>
+                  )}
+                </div>
               )}
               <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 12 }}>
                 Created {formatDate(p.createdAt)}
@@ -273,7 +327,7 @@ const inputStyle: CSSProperties = {
   padding: "8px 10px",
   borderRadius: "var(--radius-sm)",
   border: "1px solid var(--glass-border)",
-  background: "rgba(0,0,0,0.2)",
+  backgroundColor: "rgba(0,20,30,0.3)",
   color: "var(--text-primary)",
   fontSize: 13,
 };

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useAccountStore } from "../store/accountStore";
 import { GlassCard } from "../components/GlassCard";
 import { MonoField } from "../components/MonoField";
+import { Avatar } from "../components/Avatar";
+import { PageHeader } from "../components/PageHeader";
 import { open } from "@tauri-apps/plugin-dialog";
 import { MicrosoftLoginButton } from "../components/MicrosoftLoginButton";
 import { createOfflineAccount, resetAccountSkin, setAccountSkin, setAccountSkinFile } from "../lib/tauri";
@@ -14,9 +16,38 @@ import type { Account } from "../types/account";
 // Per-instance account assignment is still a later step; this is the global
 // switcher.
 
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        padding: "10px 12px",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid var(--glass-border)",
+        background: "var(--glass-bg-elevated)",
+      }}
+    >
+      <div style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+        {label}
+      </div>
+      <div
+        style={{
+          fontSize: 16,
+          fontWeight: 600,
+          marginTop: 2,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function ActiveDot() {
   return (
-    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "var(--accent)", color: "var(--accent-fg)" }}>
+    <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 0, background: "var(--accent)", color: "var(--accent-fg)" }}>
       Active
     </span>
   );
@@ -63,7 +94,7 @@ function SkinEditor({ account, onDone }: { account: Account; onDone: () => void 
     <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
         <label style={{ fontSize: 11, color: "var(--text-secondary)" }}>Model</label>
-        <select value={variant} onChange={(e) => setVariant(e.target.value)} style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}>
+        <select value={variant} onChange={(e) => setVariant(e.target.value)} style={{ padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", backgroundColor: "rgba(0,20,30,0.3)", color: "var(--text-primary)", fontSize: 12 }}>
           <option value="classic">Classic</option>
           <option value="slim">Slim</option>
         </select>
@@ -83,7 +114,7 @@ function SkinEditor({ account, onDone }: { account: Account; onDone: () => void 
           onChange={(e) => setUrl(e.target.value)}
           placeholder="…or paste a public .png URL"
           spellCheck={false}
-          style={{ flex: 1, padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", background: "rgba(0,0,0,0.2)", color: "var(--text-primary)", fontSize: 12 }}
+          style={{ flex: 1, padding: "6px 8px", borderRadius: "var(--radius-sm)", border: "1px solid var(--glass-border)", backgroundColor: "rgba(0,20,30,0.3)", color: "var(--text-primary)", fontSize: 12 }}
         />
         <button className="accent" disabled={busy || !url.trim()} onClick={() => run(() => setAccountSkin(account.id, url.trim(), variant))} style={{ fontSize: 12, padding: "6px 10px" }}>
           {busy ? "…" : "Apply URL"}
@@ -99,15 +130,10 @@ function AccountCard({ account, active, onActivate, onRemove, onDone }: { accoun
   return (
     <GlassCard>
       <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-        {/* Skin face crop for Microsoft accounts (skinUrl is a full skin PNG;
-            we just show it — a proper face crop would need canvas slicing). */}
-        <div style={{ width: 44, height: 44, borderRadius: "var(--radius-sm)", background: "var(--glass-bg-elevated)", overflow: "hidden", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {account.skinUrl ? (
-            <img src={account.skinUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", imageRendering: "pixelated" }} />
-          ) : (
-            <span style={{ fontSize: 18 }}>{isMs ? "🎮" : "👤"}</span>
-          )}
-        </div>
+        {/* Real face crop out of the skin sheet — see components/Avatar.tsx.
+            This used to stretch the whole 64x64 PNG into the tile, which showed
+            the entire unwrapped skin instead of the head. */}
+        <Avatar account={account} size={44} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ fontWeight: 600, fontSize: 15 }}>{account.username}</span>
@@ -170,19 +196,46 @@ export function Accounts() {
 
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600 }}>Accounts</h1>
-        {!adding && (
-          <button className="accent" onClick={() => setAdding(true)}>
-            + Add account
-          </button>
-        )}
-      </div>
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 24 }}>
-        Launch uses the active account. Microsoft accounts can join online servers &amp; Realms; offline accounts are LAN/singleplayer only.
-      </div>
+      <PageHeader
+        page="accounts"
+        actions={
+          !adding ? (
+            <button className="accent" onClick={() => setAdding(true)}>
+              Add account
+            </button>
+          ) : undefined
+        }
+      />
 
       {error && <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 16 }}>{error}</div>}
+
+      {/* At-a-glance summary. The chat identity is here because your IRC nick is
+          derived from the active account's username, which isn't obvious from
+          the Sonar screen alone. */}
+      {accounts.length > 0 && (
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 10,
+            marginBottom: 20,
+          }}
+        >
+          <SummaryTile label="Accounts" value={String(accounts.length)} />
+          <SummaryTile
+            label="Microsoft"
+            value={String(accounts.filter((a) => a.accountType === "microsoft").length)}
+          />
+          <SummaryTile
+            label="Offline copies"
+            value={String(accounts.filter((a) => a.accountType === "offline").length)}
+          />
+          <SummaryTile
+            label="Chat nick"
+            value={accounts.find((a) => a.id === activeId)?.username ?? "—"}
+          />
+        </div>
+      )}
 
       {adding && (
         <GlassCard style={{ maxWidth: 420, marginBottom: 24 }}>

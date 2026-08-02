@@ -372,7 +372,11 @@ pub const BLURRED_ESSENTIALS: &[&str] = &[
     "shulkerboxtooltip",
     "malilib",
     "simple-voice-chat",
-    "jei",
+    // JEI was pulled from the default set on request. Anyone who wants a recipe
+    // viewer can add it — or EMI — from Browse in two clicks.
+    //
+    // `searchables` stays: it's a shared library several other mods depend on,
+    // not a JEI-only dependency, so removing it with JEI would break them.
     "searchables",
     "combat-hitboxes",
     "consumableoptimizer",

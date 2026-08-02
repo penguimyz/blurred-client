@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { GlobalSettings, Theme } from "../types/settings";
 import { useSettingsStore, applyTheme, applyAccent } from "../store/settingsStore";
 import { GlassCard } from "../components/GlassCard";
+import { PageHeader } from "../components/PageHeader";
 import { MonoField } from "../components/MonoField";
 import { CustomCommandsForm, EnvVarsForm, JavaForm } from "../components/OverrideSettingsForm";
 import { checkLauncherUpdate, type UpdateStatus } from "../lib/tauri";
@@ -15,7 +16,9 @@ import { checkLauncherUpdate, type UpdateStatus } from "../lib/tauri";
 // re-tints under your cursor; Save persists.
 
 const THEMES: Theme[] = ["dark", "light", "system"];
-const ACCENT_SWATCHES = ["#7c9cff", "#4c6fff", "#a78bfa", "#22d3ee", "#34d399", "#fb7185", "#fbbf24"];
+// Reordered for the ocean palette: the bioluminescent cyan default first, then
+// the rest of the reef. The old purple stays available, just not first.
+const ACCENT_SWATCHES = ["#35e0d0", "#22d3ee", "#38bdf8", "#34d399", "#a78bfa", "#fb7185", "#fbbf24"];
 
 export function Settings() {
   const { settings, refresh, save } = useSettingsStore();
@@ -62,7 +65,7 @@ export function Settings() {
 
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
-      <h1 style={{ margin: "0 0 24px", fontSize: 22, fontWeight: 600 }}>Settings</h1>
+      <PageHeader page="settings" />
 
       <div style={{ maxWidth: 720, display: "flex", flexDirection: "column", gap: 16 }}>
         <GlassCard>
@@ -98,7 +101,7 @@ export function Settings() {
                     style={{
                       width: 28,
                       height: 28,
-                      borderRadius: "50%",
+                      borderRadius: 0,
                       background: c,
                       border: draft.accentColor.toLowerCase() === c ? "2px solid var(--text-primary)" : "2px solid transparent",
                       cursor: "pointer",
@@ -214,6 +217,75 @@ export function Settings() {
           </div>
         </GlassCard>
 
+        <GlassCard>
+          <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>Chat (Sonar)</h3>
+          <p style={{ margin: "0 0 16px", fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+            Sonar connects to a public IRC network, so there's no extra account and nothing to
+            host. You chat under your Minecraft username. Nicks are first-come rather than
+            reserved, so someone else may already be using yours — the launcher adds a suffix if
+            so.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Server</label>
+                <input
+                  value={draft.chatServer}
+                  onChange={(e) => set("chatServer", e.target.value)}
+                  placeholder="irc.libera.chat"
+                  style={inputStyle}
+                />
+              </div>
+              <div style={{ width: 110 }}>
+                <label style={labelStyle}>Port (TLS)</label>
+                <input
+                  type="number"
+                  value={draft.chatPort}
+                  onChange={(e) => set("chatPort", Number(e.target.value))}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Default channel</label>
+              <input
+                value={draft.chatChannel}
+                onChange={(e) => set("chatChannel", e.target.value)}
+                placeholder="#blurred-client"
+                style={inputStyle}
+              />
+            </div>
+            <Toggle
+              checked={draft.chatAutoConnect}
+              onChange={(v) => set("chatAutoConnect", v)}
+              title="Connect automatically"
+              hint="Join chat as soon as the launcher opens."
+            />
+          </div>
+        </GlassCard>
+
+        <GlassCard>
+          <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>Ambience</h3>
+          <p style={{ margin: "0 0 16px", fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+            Purely cosmetic. Sea life is background scenery and is on by default;
+            the cursor school is a toy and is off until you ask for it.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <Toggle
+              checked={draft.seaLifeEnabled}
+              onChange={(v) => set("seaLifeEnabled", v)}
+              title="Sea life"
+              hint="Shoals, jellyfish and the occasional shark drift past in the water behind the panels."
+            />
+            <Toggle
+              checked={draft.fishEnabled}
+              onChange={(v) => set("fishEnabled", v)}
+              title="School of fish (follows your cursor)"
+              hint="A few fish chase your cursor and circle it when you hold still. Applies as soon as you save."
+            />
+          </div>
+        </GlassCard>
+
         {error && <div style={{ color: "var(--danger)", fontSize: 13 }}>{error}</div>}
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -224,6 +296,45 @@ export function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** A labelled checkbox row. The whole card is the hit target, not just the box. */
+function Toggle({
+  checked,
+  onChange,
+  title,
+  hint,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  title: string;
+  hint: string;
+}) {
+  return (
+    <label
+      style={{
+        display: "flex",
+        gap: 10,
+        alignItems: "flex-start",
+        padding: 10,
+        borderRadius: "var(--radius-sm)",
+        border: `1px solid ${checked ? "var(--accent)" : "var(--glass-border)"}`,
+        background: checked ? "var(--glass-bg-elevated)" : "transparent",
+        cursor: "pointer",
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ marginTop: 2 }}
+      />
+      <span>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{title}</div>
+        <div style={{ fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>{hint}</div>
+      </span>
+    </label>
   );
 }
 
@@ -240,7 +351,7 @@ const inputStyle = {
   padding: "8px 10px",
   borderRadius: "var(--radius-sm)",
   border: "1px solid var(--glass-border)",
-  background: "rgba(0,0,0,0.2)",
+  backgroundColor: "rgba(0,20,30,0.3)",
   color: "var(--text-primary)",
   fontSize: 13,
 };

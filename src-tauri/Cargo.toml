@@ -1,6 +1,6 @@
 [package]
 name = "blurred-client"
-version = "0.2.0"
+version = "0.3.0"
 description = "A Minecraft launcher with Lunar-grade polish and Prism-grade control."
 # Becomes the Maintainer field of the .deb/.rpm, so it ships to users.
 authors = ["penguimyz <penguimyz@users.noreply.github.com>"]
@@ -35,6 +35,11 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 window-vibrancy = "0.5"
 keyring = "2"
+# IRC (chat) transport. Both of these are already in the tree as reqwest's
+# default TLS stack, so naming them directly costs no extra compilation --
+# it just lets `commands::chat` open its own TLS socket to the IRC server.
+native-tls = "0.2"
+tokio-native-tls = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

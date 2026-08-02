@@ -1,0 +1,38 @@
+pluginManagement {
+    repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
+        maven { url = 'https://maven.kikugie.dev/releases' }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id 'dev.kikugie.stonecutter' version '0.9.7'
+}
+
+/*
+  Multi-version build.
+
+  Minecraft's client API drifts hard, so one source tree cannot compile against
+  every version unmodified. Stonecutter solves that with a source preprocessor:
+  the code carries `//?` directives, and switching the active version rewrites
+  which branch is live and which is commented out.
+
+  Adding a version means listing it here AND creating
+  `versions/<version>/gradle.properties` with its yarn + fabric-api
+  coordinates — mappings are version-locked, so those cannot be derived.
+
+  Ceiling: **1.21.11**. Fabric's yarn mappings stop there; the 26.x releases have
+  none published at all, so targeting them would mean moving the whole build to
+  Mojang official mappings, which renames every symbol in the source. That's a
+  different project, not another entry in this list.
+*/
+stonecutter {
+    create(rootProject) {
+        versions('1.21.1', '1.21.4', '1.21.8', '1.21.10', '1.21.11')
+        vcsVersion = '1.21.11'
+    }
+}
+
+rootProject.name = 'blurred-mod'

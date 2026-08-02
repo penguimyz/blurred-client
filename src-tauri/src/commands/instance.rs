@@ -350,9 +350,24 @@ pub async fn launch_instance(
     let mut jvm_args = vec![
         format!("-Xms{}M", java.min_memory_mb),
         format!("-Xmx{}M", java.max_memory_mb),
-        "-cp".to_string(),
-        classpath,
     ];
+
+    // Hand the in-game Blurred mod its bridge coordinates. System properties
+    // rather than a file or a fixed port: they reach only this process, so the
+    // token can't be read by anything the launcher didn't start (see
+    // commands::bridge). The mod treats a missing port as "launcher offline"
+    // and runs HUD-only, so this is safe to always pass.
+    {
+        let port = state.bridge.port.load(std::sync::atomic::Ordering::Relaxed);
+        if port != 0 {
+            jvm_args.push(format!("-Dblurred.bridge.port={port}"));
+            jvm_args.push(format!("-Dblurred.bridge.token={}", state.bridge.token));
+        }
+    }
+
+    jvm_args.push("-cp".to_string());
+    jvm_args.push(classpath);
+
     if !java.jvm_args.trim().is_empty() {
         jvm_args.extend(java.jvm_args.split_whitespace().map(String::from));
     }
@@ -481,12 +496,28 @@ pub async fn launch_instance(
     // remove it once the process is gone (whether it exited on its own or was
     // killed). Its presence in `state.running` is also how the UI knows the
     // instance is running.
+    // Keep the in-game companion mod current. Best-effort: a failure here must
+    // not stop the game from launching, since the mod is an enhancement rather
+    // than a requirement.
+    if let Err(e) = crate::commands::companion::sync_companion(&app, &instance, &dir) {
+        tracing::warn!("could not install companion mod: {e}");
+    }
+
     let (kill_tx, kill_rx) = tokio::sync::oneshot::channel();
     state.running.lock().unwrap().insert(instance_id.clone(), kill_tx);
 
+    // One log file per session, named by start time so they sort chronologically
+    // in a file browser. Kept inside the instance dir so "open folder" leads
+    // straight to it and deleting an instance takes its logs with it.
+    let session_log = dir.join("logs").join(format!(
+        "session-{}.log",
+        chrono::Local::now().format("%Y-%m-%d_%H-%M-%S")
+    ));
+    prune_session_logs(&dir.join("logs"));
+
     let launch_start = std::time::Instant::now();
     let result = launch_and_stream(
-        app,
+        app.clone(),
         instance_id.clone(),
         java_exe,
         jvm_args,
@@ -494,21 +525,69 @@ pub async fn launch_instance(
         game_args,
         dir.clone(),
         env_vars,
+        session_log,
         kill_rx,
     )
     .await;
 
     state.running.lock().unwrap().remove(&instance_id);
-    let exit_code = result.map_err(|e| e.to_string())?;
+    let outcome = result.map_err(|e| e.to_string())?;
 
     let elapsed = launch_start.elapsed().as_secs();
     instance.total_playtime_seconds += elapsed;
     save_instance(&dir, &instance).map_err(|e| e.to_string())?;
 
-    if exit_code != 0 {
-        return Err(format!("minecraft exited with code {exit_code}"));
+    if outcome.exit_code != 0 {
+        // A crash the user quit out of isn't worth a report — but we can't tell
+        // those apart by exit code alone on every platform, so record it and let
+        // the UI decide what to surface. The report is written before returning
+        // so it exists even though the caller sees only an error string.
+        let report = crate::models::crash::CrashReport {
+            id: Uuid::new_v4().to_string(),
+            instance_id: instance_id.clone(),
+            instance_name: instance.name.clone(),
+            mc_version: instance.mc_version.clone(),
+            loader: format!("{:?}", instance.loader).to_lowercase(),
+            exit_code: outcome.exit_code,
+            occurred_at: chrono::Utc::now().to_rfc3339(),
+            log_path: outcome.log_path.to_string_lossy().to_string(),
+            summary: crate::models::crash::diagnose(outcome.exit_code, &outcome.tail),
+            tail: outcome.tail,
+        };
+        crate::commands::crashes::save_report(&state, &report);
+        let _ = app.emit("instance-crashed", report);
+
+        return Err(format!("minecraft exited with code {}", outcome.exit_code));
     }
     Ok(())
+}
+
+/// Keep the last 10 session logs per instance. Without this, a modpack that
+/// logs heavily leaves hundreds of megabytes behind over a few weeks of play.
+fn prune_session_logs(logs_dir: &std::path::Path) {
+    const KEEP: usize = 10;
+
+    let Ok(read) = std::fs::read_dir(logs_dir) else { return };
+    let mut sessions: Vec<_> = read
+        .flatten()
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with("session-")
+        })
+        .collect();
+
+    if sessions.len() <= KEEP {
+        return;
+    }
+    sessions.sort_by_key(|e| {
+        e.metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+    });
+    for entry in sessions.iter().take(sessions.len() - KEEP) {
+        let _ = std::fs::remove_file(entry.path());
+    }
 }
 
 /// Maven coordinate -> repo-relative jar path, including any classifier:

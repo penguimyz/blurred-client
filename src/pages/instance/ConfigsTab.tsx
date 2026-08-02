@@ -180,7 +180,7 @@ const selectStyle = {
   padding: "6px 10px",
   borderRadius: "var(--radius-sm)",
   border: "1px solid var(--glass-border)",
-  background: "rgba(0,0,0,0.2)",
+  backgroundColor: "rgba(0,20,30,0.3)",
   color: "var(--text-primary)",
   fontSize: 13,
 };

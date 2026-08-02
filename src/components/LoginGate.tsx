@@ -1,4 +1,5 @@
 import { GlassCard } from "./GlassCard";
+import { Logo } from "./Icon";
 import { MicrosoftLoginButton } from "./MicrosoftLoginButton";
 
 /**
@@ -20,11 +21,14 @@ export function LoginGate({ onSuccess }: { onSuccess: () => void }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "var(--backdrop-gradient)",
+        // No background of its own: the animated water backdrop sits behind the
+        // whole app, and covering it with a flat gradient here would make the
+        // very first screen the only static one.
       }}
     >
       <GlassCard style={{ width: 420, textAlign: "center", padding: 40 }}>
-        <h1 style={{ fontSize: 20, marginBottom: 8 }}>Sign in to Blurred Client</h1>
+        <Logo size={40} />
+        <h1 style={{ fontSize: 20, marginBottom: 8, marginTop: 12 }}>Sign in to Blurred Client</h1>
         <p style={{ color: "var(--text-secondary)", fontSize: 13, marginBottom: 24 }}>
           Sign in with your Microsoft account to get started.
         </p>

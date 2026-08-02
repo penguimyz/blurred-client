@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "id": "blurred",
+  "version": "${version}",
+  "name": "Blurred",
+  "description": "In-game companion for Blurred Client: ocean-styled HUD, crew list and chat without leaving the game.",
+  "authors": ["penguimyz"],
+  "contact": {
+    "homepage": "https://github.com/penguimyz/blurred-client",
+    "sources": "https://github.com/penguimyz/blurred-client"
+  },
+  "license": "MIT",
+  "icon": "assets/blurred/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["dev.blurredclient.mod.BlurredMod"]
+  },
+  "mixins": [
+    {
+      "config": "blurred.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~${mcVersion}",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

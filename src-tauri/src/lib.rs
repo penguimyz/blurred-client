@@ -18,6 +18,27 @@ pub fn run() {
             let state = AppState::init().expect("failed to initialize app state -- check disk permissions on the data dir");
             app.manage(state);
 
+            // Loopback bridge the in-game Blurred mod talks to. Started here so
+            // the port exists before any instance can launch — `launch_instance`
+            // passes it to the game as a JVM property. A failure here is not
+            // fatal: the launcher works fine, the mod just reports "launcher
+            // offline" and falls back to HUD-only.
+            {
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    match crate::commands::bridge::start(handle.clone()).await {
+                        Ok(port) => {
+                            let state = handle.state::<AppState>();
+                            state
+                                .bridge
+                                .port
+                                .store(port, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        Err(e) => tracing::warn!("mod bridge unavailable: {e}"),
+                    }
+                });
+            }
+
             // OS-level blur-behind for the glass theme. Without it,
             // `transparent: true` in tauri.conf.json just gives you a
             // see-through window with no blur -- the CSS backdrop-filter only
@@ -93,6 +114,40 @@ pub fn run() {
             commands::online_auth::set_account_skin_file,
             commands::online_auth::reset_account_skin,
             commands::update::check_launcher_update,
+            commands::chat::chat_status,
+            commands::chat::chat_connect,
+            commands::chat::chat_disconnect,
+            commands::chat::chat_send,
+            commands::chat::chat_join,
+            commands::chat::chat_part,
+            commands::chat::chat_names,
+            commands::chat::list_friends,
+            commands::chat::add_friend,
+            commands::chat::accept_friend,
+            commands::chat::decline_friend,
+            commands::chat::remove_friend,
+            commands::crashes::list_crash_reports,
+            commands::crashes::delete_crash_report,
+            commands::crashes::clear_crash_reports,
+            commands::crashes::read_session_log,
+            commands::bridge::bridge_info,
+            commands::bridge::current_server,
+            commands::capes::list_capes,
+            commands::capes::save_cape,
+            commands::capes::delete_cape,
+            commands::capes::read_cape,
+            commands::capes::set_active_cape,
+            commands::servers::list_servers,
+            commands::servers::create_server,
+            commands::servers::update_server,
+            commands::servers::delete_server,
+            commands::servers::open_server_folder,
+            commands::servers::accept_eula,
+            commands::servers::start_server,
+            commands::servers::stop_server,
+            commands::servers::kill_server,
+            commands::servers::server_command,
+            commands::servers::server_statuses,
         ])
         .run(tauri::generate_context!())
         .expect("error while running blurred client");

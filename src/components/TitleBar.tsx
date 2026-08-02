@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Logo } from "./Icon";
 
 // Custom window chrome. The app runs with `decorations: false` +
 // `transparent: true` (tauri.conf.json) for the frosted-glass look, so there is
@@ -61,6 +62,7 @@ export function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-title" data-tauri-drag-region>
+        <Logo size={15} />
         Blurred Client
       </div>
       <div className="titlebar-controls">

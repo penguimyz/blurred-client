@@ -3,6 +3,21 @@ dist/
 src-tauri/target/
 src-tauri/Cargo.lock
 *.log
+
+# Fabric mod build output.
+#
+# The shipped jars live in src-tauri/resources/mod/ and ARE committed -- the
+# launcher bundles them as Tauri resources. Everything below is intermediate.
+#
+# `mod/versions/*/build/` matters: Stonecutter builds each Minecraft version in
+# its own subproject, so the output is NOT under `mod/build/`. Without this
+# line a commit picks up ~380 files of remapped Fabric API jars and loom caches.
+mod/build/
+mod/.gradle/
+mod/run/
+mod/versions/*/build/
+mod/versions/*/.gradle/
+mod/versions/*/run/
 .DS_Store
 Thumbs.db
 

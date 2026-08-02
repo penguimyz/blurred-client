@@ -1,0 +1,19 @@
+/*
+  Stonecutter controller.
+
+  This is the ROOT project's build script — the settings plugin renames it away
+  from `build.gradle`, because `build.gradle` is now the *per-version* script
+  that every entry under `versions/` runs.
+
+  Useful tasks this gives you:
+    ./gradlew "Set active project to 1.21.1"   switch the working tree
+    ./gradlew chiseledBuild                    build every version in one pass
+    ./gradlew build                            build only the active version
+*/
+plugins {
+    id 'dev.kikugie.stonecutter'
+}
+
+// Which version the source tree is currently written for. Changing this and
+// re-syncing rewrites the `//?` branches in place.
+stonecutter.active '1.21.11'

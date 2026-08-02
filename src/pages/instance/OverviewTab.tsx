@@ -76,14 +76,14 @@ export function OverviewTab({ instance }: TabProps) {
                   >
                     {i.name}
                   </div>
-                  <div style={{ flex: 1, background: "rgba(0,0,0,0.2)", borderRadius: 4, height: 18, overflow: "hidden" }}>
+                  <div style={{ flex: 1, background: "rgba(0,0,0,0.2)", borderRadius: 0, height: 18, overflow: "hidden" }}>
                     <div
                       style={{
                         width: `${(i.totalPlaytimeSeconds / max) * 100}%`,
                         minWidth: i.totalPlaytimeSeconds > 0 ? 2 : 0,
                         height: "100%",
                         background: isCurrent ? "var(--accent)" : "var(--text-tertiary)",
-                        borderRadius: 4,
+                        borderRadius: 0,
                         transition: "width 300ms ease",
                       }}
                     />

@@ -164,7 +164,7 @@ export function ModsTab({ instance, setInstance }: TabProps) {
       key: "source",
       header: "Source",
       render: (m) => (
-        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 10, background: "var(--glass-bg-elevated)", color: "var(--text-secondary)" }}>
+        <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 0, background: "var(--glass-bg-elevated)", color: "var(--text-secondary)" }}>
           {m.source}
         </span>
       ),

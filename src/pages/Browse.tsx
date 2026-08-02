@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
+import { Icon } from "../components/Icon";
+import { PageHeader } from "../components/PageHeader";
 import {
   installModrinthMod,
   installModrinthModpack,
@@ -107,10 +109,7 @@ export function Browse({ onOpenInstance }: { onOpenInstance: (id: string) => voi
 
   return (
     <div style={{ padding: 32, height: "100%", overflowY: "auto" }}>
-      <h1 style={{ margin: "0 0 4px", fontSize: 22, fontWeight: 600 }}>Browse</h1>
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 20 }}>
-        Search Modrinth and install mods (with dependencies) straight into an instance.
-      </div>
+      <PageHeader page="browse" />
 
       {notice && (
         <GlassCard style={{ marginBottom: 16 }}>
@@ -179,7 +178,7 @@ export function Browse({ onOpenInstance }: { onOpenInstance: (id: string) => voi
                   style={{
                     fontSize: 11,
                     padding: "4px 10px",
-                    borderRadius: 12,
+                    borderRadius: 0,
                     cursor: "pointer",
                     border: "1px solid var(--glass-border)",
                     background: on ? "var(--accent)" : "transparent",
@@ -206,7 +205,42 @@ export function Browse({ onOpenInstance }: { onOpenInstance: (id: string) => voi
       {searched && !loading && !error && (
         <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 12 }}>
           {total.toLocaleString()} result{total !== 1 ? "s" : ""}
+          {categories.length > 0 && ` · filtered by ${categories.join(", ")}`}
         </div>
+      )}
+
+      {/* Skeletons rather than a bare "Loading…": the cards keep their place, so
+          results don't shove the page around when they land. */}
+      {loading && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+          {Array.from({ length: 6 }).map((_, i) => (
+            <GlassCard key={i} style={{ opacity: 0.5 }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ width: 48, height: 48, borderRadius: "var(--radius-sm)", background: "var(--glass-bg-elevated)", flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ height: 13, width: "58%", borderRadius: 0, background: "var(--glass-bg-elevated)", marginBottom: 7 }} />
+                  <div style={{ height: 10, width: "34%", borderRadius: 0, background: "var(--glass-bg-elevated)" }} />
+                </div>
+              </div>
+              <div style={{ height: 10, borderRadius: 0, background: "var(--glass-bg-elevated)", margin: "14px 0 6px" }} />
+              <div style={{ height: 10, width: "72%", borderRadius: 0, background: "var(--glass-bg-elevated)" }} />
+            </GlassCard>
+          ))}
+        </div>
+      )}
+
+      {searched && !loading && !error && results.length === 0 && (
+        <GlassCard style={{ textAlign: "center", padding: 44 }}>
+          <Icon name="search" size={28} style={{ color: "var(--text-tertiary)", marginBottom: 10 }} />
+          <p style={{ color: "var(--text-secondary)", fontSize: 13, margin: "0 0 4px" }}>
+            Nothing matched{query ? ` “${query}”` : ""}.
+          </p>
+          <p style={{ color: "var(--text-tertiary)", fontSize: 12, margin: 0 }}>
+            {categories.length > 0
+              ? "Try clearing some category filters."
+              : "Try a different search term, or clear the MC version and loader filters."}
+          </p>
+        </GlassCard>
       )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
@@ -222,20 +256,60 @@ export function Browse({ onOpenInstance }: { onOpenInstance: (id: string) => voi
               ) : (
                 <div style={{ width: 48, height: 48, borderRadius: "var(--radius-sm)", background: "var(--glass-bg-elevated)", flexShrink: 0 }} />
               )}
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{hit.title}</div>
-                <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-                  {hit.downloads.toLocaleString()} downloads
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 14,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {hit.title}
                 </div>
+                <div style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                  {compactCount(hit.downloads)} downloads
+                  {hit.versions.length > 0 && ` · ${hit.versions.length} versions`}
+                </div>
+                {/* Newest few MC versions it supports — the thing you actually
+                    need to know before installing into an instance. */}
+                {hit.versions.length > 0 && (
+                  <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", marginTop: 3 }}>
+                    up to {hit.versions[hit.versions.length - 1]}
+                  </div>
+                )}
               </div>
+              <a
+                href={`https://modrinth.com/${hit.project_type}/${hit.slug}`}
+                target="_blank"
+                rel="noreferrer"
+                title="Open on Modrinth"
+                style={{ color: "var(--text-tertiary)", flexShrink: 0, display: "flex" }}
+              >
+                <Icon name="chevronRight" size={15} />
+              </a>
             </div>
-            <div style={{ fontSize: 12, color: "var(--text-secondary)", margin: "10px 0", lineHeight: 1.5 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-secondary)",
+                margin: "10px 0",
+                lineHeight: 1.5,
+                // Clamp so one verbose description can't make its card twice
+                // the height of its neighbours and shred the grid.
+                display: "-webkit-box",
+                WebkitLineClamp: 3,
+                WebkitBoxOrient: "vertical",
+                overflow: "hidden",
+              }}
+            >
               {hit.description}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {hit.categories.slice(0, 3).map((c) => (
-                  <span key={c} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 8, background: "var(--glass-bg-elevated)", color: "var(--text-tertiary)" }}>
+                  <span key={c} style={{ fontSize: 10, padding: "2px 6px", borderRadius: 0, background: "var(--glass-bg-elevated)", color: "var(--text-tertiary)" }}>
                     {c}
                   </span>
                 ))}
@@ -356,13 +430,21 @@ function InstallModal({ hit, onClose, onDone }: { hit: Hit; onClose: () => void;
   );
 }
 
+/** 1234567 -> "1.2M". Modrinth download counts run to eight digits, and the
+ *  exact number is noise — the magnitude is the signal. */
+function compactCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n < 10_000_000 ? 1 : 0)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}K`;
+  return String(n);
+}
+
 const labelStyle = { fontSize: 12, color: "var(--text-secondary)", display: "block" as const, marginBottom: 4 };
 const inputStyle = {
   width: "100%",
   padding: "8px 10px",
   borderRadius: "var(--radius-sm)",
   border: "1px solid var(--glass-border)",
-  background: "rgba(0,0,0,0.2)",
+  backgroundColor: "rgba(0,20,30,0.3)",
   color: "var(--text-primary)",
   fontSize: 13,
 };

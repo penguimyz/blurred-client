@@ -1,6 +1,11 @@
 pub mod auth;
+pub mod bridge;
+pub mod capes;
+pub mod chat;
+pub mod companion;
 pub mod config;
 pub mod content;
+pub mod crashes;
 pub mod fabric;
 pub mod instance;
 pub mod java;
@@ -9,5 +14,6 @@ pub mod mods;
 pub mod modrinth;
 pub mod mojang;
 pub mod online_auth;
+pub mod servers;
 pub mod settings;
 pub mod update;

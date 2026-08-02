@@ -216,11 +216,32 @@ fn parse_major_version(version_line: &str) -> Option<u32> {
     }
 }
 
+/// How many trailing log lines a crash report keeps inline. Enough to hold a
+/// full Java stack trace plus the mod-loader banner above it, which is where
+/// the actual cause almost always is; the complete log is on disk regardless.
+const CRASH_TAIL_LINES: usize = 250;
+
+/// What a finished game process left behind.
+pub struct LaunchOutcome {
+    pub exit_code: i32,
+    /// Last `CRASH_TAIL_LINES` lines of combined output, oldest first.
+    pub tail: Vec<String>,
+    /// Where the full session log was written.
+    pub log_path: PathBuf,
+}
+
 /// Spawns the Minecraft process and streams stdout/stderr back to the
 /// frontend as `instance-log` events, tagged with the instance id so the
 /// UI can route lines to the right Logs tab. This is the same pipe the
 /// Logs viewer (Phase 7) and playtime tracking (Phase 7) both hang off of --
 /// don't duplicate this spawn logic elsewhere.
+///
+/// Output is also written to `log_path` as it arrives, so a crash is still
+/// diagnosable after the window is closed (the frontend's log buffer is
+/// memory-only and dies with the page). Both streams funnel through a single
+/// writer task rather than sharing a file handle: that keeps the file in true
+/// chronological order and keeps blocking file I/O off the reader tasks.
+#[allow(clippy::too_many_arguments)]
 pub async fn launch_and_stream(
     app: AppHandle,
     instance_id: String,
@@ -230,8 +251,9 @@ pub async fn launch_and_stream(
     game_args: Vec<String>,
     working_dir: PathBuf,
     env_vars: Vec<(String, String)>,
+    log_path: PathBuf,
     kill_rx: tokio::sync::oneshot::Receiver<()>,
-) -> anyhow::Result<i32> {
+) -> anyhow::Result<LaunchOutcome> {
     let mut cmd = Command::new(&java_path);
     cmd.args(&jvm_args)
         .arg(&main_class)
@@ -246,29 +268,69 @@ pub async fn launch_and_stream(
     let stdout = child.stdout.take().expect("stdout was piped");
     let stderr = child.stderr.take().expect("stderr was piped");
 
+    // Single writer owning the log file and the rolling tail buffer.
+    let (log_tx, mut log_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let (tail_tx, tail_rx) = tokio::sync::oneshot::channel::<Vec<String>>();
+    let writer_log_path = log_path.clone();
+    let writer = tokio::spawn(async move {
+        use tokio::io::AsyncWriteExt;
+
+        if let Some(parent) = writer_log_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let mut file = tokio::fs::File::create(&writer_log_path).await.ok();
+        let mut tail: std::collections::VecDeque<String> =
+            std::collections::VecDeque::with_capacity(CRASH_TAIL_LINES + 1);
+
+        while let Some(line) = log_rx.recv().await {
+            if let Some(f) = file.as_mut() {
+                let _ = f.write_all(line.as_bytes()).await;
+                let _ = f.write_all(b"\n").await;
+            }
+            tail.push_back(line);
+            if tail.len() > CRASH_TAIL_LINES {
+                tail.pop_front();
+            }
+        }
+
+        if let Some(f) = file.as_mut() {
+            let _ = f.flush().await;
+        }
+        let _ = tail_tx.send(tail.into_iter().collect());
+    });
+
     let app_out = app.clone();
     let id_out = instance_id.clone();
-    tokio::spawn(async move {
+    let tx_out = log_tx.clone();
+    let out_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app_out.emit(
                 "instance-log",
                 serde_json::json!({ "instanceId": id_out, "stream": "stdout", "line": line }),
             );
+            let _ = tx_out.send(line);
         }
     });
 
     let app_err = app.clone();
     let id_err = instance_id.clone();
-    tokio::spawn(async move {
+    let tx_err = log_tx.clone();
+    let err_task = tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
             let _ = app_err.emit(
                 "instance-log",
                 serde_json::json!({ "instanceId": id_err, "stream": "stderr", "line": line }),
             );
+            let _ = tx_err.send(line);
         }
     });
+
+    // Our own sender must go before awaiting the writer, or the channel never
+    // closes and the tail never arrives. The task clones are dropped when the
+    // two reader tasks below finish.
+    drop(log_tx);
 
     // Wait for the game to exit on its own, OR for a quit request to arrive on
     // `kill_rx` (the Quit button) — whichever comes first. On quit we ask the
@@ -281,7 +343,20 @@ pub async fn launch_and_stream(
             child.wait().await?
         }
     };
-    Ok(status.code().unwrap_or(-1))
+
+    // `child.wait()` can return before the pipes are drained, and the last
+    // lines before a crash are exactly the ones worth keeping — so join the
+    // readers (which closes the channel) before collecting the tail.
+    let _ = out_task.await;
+    let _ = err_task.await;
+    let _ = writer.await;
+    let tail = tail_rx.await.unwrap_or_default();
+
+    Ok(LaunchOutcome {
+        exit_code: status.code().unwrap_or(-1),
+        tail,
+        log_path,
+    })
 }
 
 /// Builds the classpath string with the platform's separator: `;` on Windows,
