@@ -163,9 +163,24 @@ public class CrewScreen extends Screen {
         return true;
     }
 
+    /**
+     * Background plus this screen's chrome.
+     *
+     * <p>All the panel drawing lives here rather than in {@link #render},
+     * because {@code renderBackground} is the one method the framework
+     * guarantees to call <b>exactly once per frame</b> — and calling it a second
+     * time by hand is a hard crash in-game:
+     *
+     * <pre>java.lang.IllegalStateException: Can only blur once per frame</pre>
+     *
+     * <p>Which side calls it differs by version — 1.21.1 calls it from
+     * {@code Screen.render}, 1.21.11 from {@code renderWithTooltip} before
+     * {@code render} — so overriding it is the only placement that is correct
+     * on both without a version branch.
+     */
     @Override
-    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        this.renderBackground(ctx, mouseX, mouseY, delta);
+    public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        super.renderBackground(ctx, mouseX, mouseY, delta);
 
         LauncherBridge bridge = LauncherBridge.get();
 
@@ -189,25 +204,9 @@ public class CrewScreen extends Screen {
         ctx.drawTextWithShadow(this.textRenderer, Text.literal("CREW"),
                 GAP + 5, 30, Theme.TEXT_FAINT);
 
-        List<Friend> crew = bridge.crew();
-        if (crew.isEmpty()) {
+        if (bridge.crew().isEmpty()) {
             ctx.drawTextWithShadow(this.textRenderer, Text.literal("No crew yet"),
                     GAP + 6, 50, Theme.TEXT_FAINT);
-        } else {
-            // Presence dots, drawn over the row buttons the button list placed.
-            int y = 46;
-            for (Friend f : crew) {
-                if (y > this.height - 60) {
-                    break;
-                }
-                ctx.fill(GAP + SIDEBAR_W - 10, y + 7, GAP + SIDEBAR_W - 6, y + 11,
-                        f.online() ? Theme.ONLINE : Theme.OFFLINE);
-                if (f.isJoinable()) {
-                    ctx.drawTextWithShadow(this.textRenderer, Text.literal("▶"),
-                            GAP + SIDEBAR_W - 22, y + 5, Theme.ACCENT);
-                }
-                y += 21;
-            }
         }
 
         // Chat column
@@ -218,11 +217,38 @@ public class CrewScreen extends Screen {
         ctx.drawTextWithShadow(this.textRenderer,
                 Text.literal(target.isEmpty() ? "No conversation" : target),
                 chatX + 5, 30, Theme.TEXT_FAINT);
+    }
 
-        renderTranscript(ctx, bridge, chatX, chatW);
-
-        this.input.render(ctx, mouseX, mouseY, delta);
+    @Override
+    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        // Background and panels come from renderBackground, which the framework
+        // calls for us — see the note there. Widgets are drawn by super.
         super.render(ctx, mouseX, mouseY, delta);
+
+        LauncherBridge bridge = LauncherBridge.get();
+
+        // Presence dots sit ON TOP of the crew row buttons, so they have to be
+        // drawn after super has rendered those widgets.
+        int y = 46;
+        for (Friend f : bridge.crew()) {
+            if (y > this.height - 60) {
+                break;
+            }
+            ctx.fill(GAP + SIDEBAR_W - 10, y + 7, GAP + SIDEBAR_W - 6, y + 11,
+                    f.online() ? Theme.ONLINE : Theme.OFFLINE);
+            if (f.isJoinable()) {
+                ctx.drawTextWithShadow(this.textRenderer, Text.literal("▶"),
+                        GAP + SIDEBAR_W - 22, y + 5, Theme.ACCENT);
+            }
+            y += 21;
+        }
+
+        int chatX = SIDEBAR_W + GAP * 2;
+        renderTranscript(ctx, bridge, chatX, this.width - chatX - GAP);
+
+        // Added with addSelectableChild, not addDrawableChild, so it isn't in
+        // the list super just rendered.
+        this.input.render(ctx, mouseX, mouseY, delta);
     }
 
     /**

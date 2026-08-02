@@ -1,6 +1,6 @@
 [package]
 name = "blurred-client"
-version = "0.3.0"
+version = "0.3.1"
 description = "A Minecraft launcher with Lunar-grade polish and Prism-grade control."
 # Becomes the Maintainer field of the .deb/.rpm, so it ships to users.
 authors = ["penguimyz <penguimyz@users.noreply.github.com>"]

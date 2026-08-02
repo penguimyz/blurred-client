@@ -99,9 +99,17 @@ public class CosmeticsScreen extends Screen {
         return true;
     }
 
+    /**
+     * Everything is drawn here rather than in {@link #render} for the same
+     * reason as {@link CrewScreen}: {@code renderBackground} is called exactly
+     * once per frame by the framework, and calling it a second time by hand
+     * crashes in-game with "Can only blur once per frame". Which side calls it
+     * differs between 1.21.1 and 1.21.11, so overriding it is the only
+     * placement correct on both.
+     */
     @Override
-    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        this.renderBackground(ctx, mouseX, mouseY, delta);
+    public void renderBackground(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        super.renderBackground(ctx, mouseX, mouseY, delta);
 
         LauncherBridge bridge = LauncherBridge.get();
         int panelX = this.width / 2 - 155;
@@ -118,7 +126,6 @@ public class CosmeticsScreen extends Screen {
                     this.textRenderer,
                     Text.literal("Launcher offline — start Blurred Client to manage capes"),
                     this.width / 2, this.height / 2, Theme.WARNING);
-            super.render(ctx, mouseX, mouseY, delta);
             return;
         }
 
@@ -128,7 +135,6 @@ public class CosmeticsScreen extends Screen {
                     this.textRenderer,
                     Text.literal("No capes yet — draw one in the launcher's Cosmetics tab"),
                     this.width / 2, this.height / 2, Theme.TEXT_FAINT);
-            super.render(ctx, mouseX, mouseY, delta);
             return;
         }
 
@@ -166,6 +172,11 @@ public class CosmeticsScreen extends Screen {
                 Text.literal("Capes show to other Blurred Client players only"),
                 this.width / 2, this.height - 30, Theme.TEXT_FAINT);
 
+    }
+
+    @Override
+    public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+        // Panels and text are drawn in renderBackground; super draws the widgets.
         super.render(ctx, mouseX, mouseY, delta);
     }
 
