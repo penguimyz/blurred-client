@@ -208,12 +208,38 @@ export function Settings() {
         </GlassCard>
 
         <GlassCard>
-          <h3 style={{ margin: "0 0 16px", fontSize: 14 }}>Microsoft sign-in</h3>
-          <label style={labelStyle}>Azure application (client) ID</label>
-          <MonoField value={draft.msaClientId} onChange={(v) => set("msaClientId", v)} copyable={false} />
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
-            The Azure app registration used for Microsoft/Xbox login. Public identifier, not a secret.
-            Your Azure app must have "Allow public client flows" enabled. Changing this only affects new sign-ins.
+          <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>Connections</h3>
+          <p style={{ margin: "0 0 16px", fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+            Where sign-in and chat actually connect to. These are fixed, and shown here so you can
+            see them rather than edit them — pointing sign-in at a different Azure app hands your
+            Microsoft login flow to whoever owns it, and pointing chat somewhere else sends your
+            username and messages there. Neither has a good reason to be a text box.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={labelStyle}>
+                Azure application (client) ID <Locked />
+              </label>
+              <MonoField value={draft.msaClientId} copyable />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>
+                  Chat server <Locked />
+                </label>
+                <MonoField value={draft.chatServer} copyable={false} />
+              </div>
+              <div style={{ width: 110 }}>
+                <label style={labelStyle}>Port (TLS)</label>
+                <MonoField value={String(draft.chatPort)} copyable={false} />
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>
+                Default channel <Locked />
+              </label>
+              <MonoField value={draft.chatChannel} copyable={false} />
+            </div>
           </div>
         </GlassCard>
 
@@ -225,43 +251,12 @@ export function Settings() {
             reserved, so someone else may already be using yours — the launcher adds a suffix if
             so.
           </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ display: "flex", gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Server</label>
-                <input
-                  value={draft.chatServer}
-                  onChange={(e) => set("chatServer", e.target.value)}
-                  placeholder="irc.libera.chat"
-                  style={inputStyle}
-                />
-              </div>
-              <div style={{ width: 110 }}>
-                <label style={labelStyle}>Port (TLS)</label>
-                <input
-                  type="number"
-                  value={draft.chatPort}
-                  onChange={(e) => set("chatPort", Number(e.target.value))}
-                  style={inputStyle}
-                />
-              </div>
-            </div>
-            <div>
-              <label style={labelStyle}>Default channel</label>
-              <input
-                value={draft.chatChannel}
-                onChange={(e) => set("chatChannel", e.target.value)}
-                placeholder="#blurred-client"
-                style={inputStyle}
-              />
-            </div>
-            <Toggle
-              checked={draft.chatAutoConnect}
-              onChange={(v) => set("chatAutoConnect", v)}
-              title="Connect automatically"
-              hint="Join chat as soon as the launcher opens."
-            />
-          </div>
+          <Toggle
+            checked={draft.chatAutoConnect}
+            onChange={(v) => set("chatAutoConnect", v)}
+            title="Connect automatically"
+            hint="Join chat as soon as the launcher opens."
+          />
         </GlassCard>
 
         <GlassCard>
@@ -296,6 +291,26 @@ export function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Marks a field the backend will refuse to change. */
+function Locked() {
+  return (
+    <span
+      title="Fixed by the launcher — the backend ignores changes to this."
+      style={{
+        marginLeft: 6,
+        fontSize: 9,
+        letterSpacing: "0.08em",
+        padding: "1px 5px",
+        border: "1px solid var(--glass-border)",
+        color: "var(--text-tertiary)",
+        verticalAlign: "middle",
+      }}
+    >
+      LOCKED
+    </span>
   );
 }
 

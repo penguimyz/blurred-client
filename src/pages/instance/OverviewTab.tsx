@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { TabProps } from "./InstanceDetail";
 import type { Instance } from "../../types/instance";
 import { GlassCard } from "../../components/GlassCard";
-import { listInstances } from "../../lib/tauri";
+import { installJavaRuntime, listInstances, planJava, type JavaPlan } from "../../lib/tauri";
 import { formatDuration, formatRelativeDate, formatDate } from "../../lib/format";
 
 // Overview is the surface-layer face of the instance: glossy stat tiles and a
@@ -10,6 +10,90 @@ import { formatDuration, formatRelativeDate, formatDate } from "../../lib/format
 // it plots this instance's total playtime against every other instance so the
 // "per-instance vs all-time" comparison the spec asks for is visible at a
 // glance, with the current instance highlighted in the accent color.
+
+/**
+ * What this instance will launch with, and where that Java is coming from.
+ *
+ * Worth stating plainly rather than leaving to be discovered at launch: "Java
+ * 21 will be downloaded on first launch" answers the question before it's
+ * asked, and the pre-install button means the download can happen now instead
+ * of in the two minutes between pressing Play and the game appearing.
+ */
+function JavaCard({ mcVersion }: { mcVersion: string }) {
+  const [plan, setPlan] = useState<JavaPlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    planJava(mcVersion).then(setPlan).catch(() => setPlan(null));
+  };
+  useEffect(refresh, [mcVersion]);
+
+  if (!plan) return null;
+
+  const tone =
+    plan.source === "unsupported"
+      ? "var(--danger)"
+      : plan.source === "download"
+        ? "var(--warning)"
+        : "var(--success)";
+
+  return (
+    <GlassCard>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <h3 style={{ margin: 0, fontSize: 14, flex: 1 }}>Java {plan.requiredMajor}</h3>
+        <span style={{ fontSize: 10.5, color: tone, letterSpacing: "0.05em" }}>
+          {plan.source.toUpperCase()}
+        </span>
+      </div>
+
+      <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+        {plan.detail}
+      </div>
+
+      {plan.path && (
+        <div
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-tertiary)",
+            marginTop: 6,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+          title={plan.path}
+        >
+          {plan.path}
+        </div>
+      )}
+
+      {plan.source === "download" && (
+        <button
+          onClick={async () => {
+            setBusy(true);
+            setError(null);
+            try {
+              await installJavaRuntime(plan.requiredMajor);
+              refresh();
+            } catch (e) {
+              setError(String(e));
+            } finally {
+              setBusy(false);
+            }
+          }}
+          disabled={busy}
+          style={{ marginTop: 12, fontSize: 12 }}
+        >
+          {busy ? "Downloading…" : "Download it now"}
+        </button>
+      )}
+
+      {error && (
+        <div style={{ color: "var(--danger)", fontSize: 12, marginTop: 10 }}>{error}</div>
+      )}
+    </GlassCard>
+  );
+}
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
@@ -48,6 +132,8 @@ export function OverviewTab({ instance }: TabProps) {
         <StatTile label="Mods" value={`${enabledMods}${instance.mods.length !== enabledMods ? ` / ${instance.mods.length}` : ""}`} />
         <StatTile label="All-time (all instances)" value={formatDuration(allTime)} />
       </div>
+
+      <JavaCard mcVersion={instance.mcVersion} />
 
       <GlassCard>
         <h3 style={{ margin: "0 0 4px", fontSize: 14 }}>Playtime by instance</h3>

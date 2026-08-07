@@ -32,6 +32,38 @@ public final class BlurredConfig {
     public boolean showCoords = false;
     public boolean showDirection = false;
     public boolean showCps = false;
+    /** Real-world clock. Handy when the game is fullscreen over the taskbar. */
+    public boolean showClock = false;
+
+    /** Where the island sits along the top edge. */
+    public HudPosition hudPosition = HudPosition.TOP_LEFT;
+
+    /**
+     * Draw the readouts as one merged pill rather than a stack of rows.
+     *
+     * <p>On by default because the merged form is the whole point of the
+     * redesign, but a stack is genuinely better if you turn on five readouts at
+     * once, so it stays switchable.
+     */
+    public boolean hudIsland = true;
+
+    public enum HudPosition {
+        TOP_LEFT,
+        TOP_CENTER,
+        TOP_RIGHT;
+
+        public String label() {
+            return switch (this) {
+                case TOP_LEFT -> "Top left";
+                case TOP_CENTER -> "Top middle";
+                case TOP_RIGHT -> "Top right";
+            };
+        }
+
+        public HudPosition next() {
+            return values()[(ordinal() + 1) % values().length];
+        }
+    }
 
     // --- Crew ---
     /** Show a toast in-game when a crew message arrives. */
@@ -56,6 +88,30 @@ public final class BlurredConfig {
 
     /** Show the real ping in the tab list instead of the five-bar signal icon. */
     public boolean numericPing = true;
+
+    /**
+     * Mark players who are also running Blurred with the client's icon, in the
+     * tab list and above their heads.
+     */
+    public boolean showClientBadge = true;
+
+    // --- Interop ---
+    /**
+     * Stand down from restyling menus when Essential is installed.
+     *
+     * <p>Essential draws its own main-menu and social UI. Two clients both
+     * reskinning the same screens is how you get unreadable overlapping
+     * chrome, and Essential's is the more invasive of the two, so ours yields.
+     * Off by default — most people don't have both — and it only does anything
+     * when Essential is actually present.
+     */
+    public boolean deferToEssential = true;
+
+    /**
+     * Tell your crew when you open a singleplayer world to LAN, so they get a
+     * one-click join instead of you reading an IP address out loud.
+     */
+    public boolean announceLanWorlds = true;
 
     public static BlurredConfig get() {
         if (instance == null) {

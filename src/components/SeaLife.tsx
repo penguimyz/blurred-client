@@ -30,7 +30,7 @@ const MAX_CREATURES = 4;
  *  "occasional", and at the original 2.6s the screen read as an aquarium. */
 const SPAWN_EVERY_MS = 11000;
 
-type Kind = "shoal" | "jelly" | "shark" | "ray";
+type Kind = "shoal" | "jelly" | "shark" | "ray" | "eyes";
 
 /** Relative spawn weights. Sharks are rare on purpose — that's what makes one
  *  crossing the screen feel like something rather than wallpaper. */
@@ -41,6 +41,9 @@ const WEIGHTS: Array<[Kind, number]> = [
   // ~4% of an 11s spawn tick: roughly one shark every few minutes. A shark
   // should be something you notice, not part of the furniture.
   ["shark", 4],
+  // Rarer still — about one in fifty spawn ticks, so roughly every ten minutes
+  // of having the launcher open. Something you're not sure you saw.
+  ["eyes", 2],
 ];
 
 interface Creature {
@@ -57,6 +60,16 @@ interface Creature {
   /** Fish per shoal; unused by other kinds. */
   count: number;
   seed: number;
+  /** Frames alive. Only the leviathan uses it — see `lifespan`. */
+  life: number;
+  /**
+   * Frames to live, or 0 for "until it swims off screen".
+   *
+   * Everything else is retired by position, which can't work for something
+   * that never crosses the frame: the eyes open somewhere in the dark, hold,
+   * and close again where they were.
+   */
+  lifespan: number;
 }
 
 function pickKind(): Kind {
@@ -90,9 +103,25 @@ function spawn(kind: Kind): Creature {
     depth,
     count: 0,
     seed: Math.random() * 1000,
+    life: 0,
+    lifespan: 0,
   };
 
   switch (kind) {
+    case "eyes":
+      // Opens somewhere in the dark rather than entering from a side, and is
+      // kept clear of the frame edges so a half-visible pair can't read as a
+      // rendering glitch. Barely moves: the drift is enough to feel alive and
+      // little enough that it never becomes an animation you watch.
+      return {
+        ...base,
+        x: w * (0.15 + Math.random() * 0.7),
+        y: h * (0.25 + Math.random() * 0.5),
+        vx: (Math.random() - 0.5) * 0.14,
+        vy: (Math.random() - 0.5) * 0.05,
+        scale: 1.5 + Math.random() * 1.1,
+        lifespan: EYES_LIFESPAN,
+      };
     case "shark":
       return {
         ...base,
@@ -133,8 +162,10 @@ function spawn(kind: Kind): Creature {
   }
 }
 
-/** Off-screen far enough that it can be retired. */
+/** Off-screen far enough — or, for the leviathan, done — that it can be retired. */
 function isGone(c: Creature): boolean {
+  if (c.lifespan > 0) return c.life >= c.lifespan;
+
   const pad = 400;
   return (
     c.x < -pad ||
@@ -193,6 +224,7 @@ export function SeaLife() {
         c.x += c.vx;
         c.y += c.vy;
         c.phase += 0.03 + c.depth * 0.02;
+        c.life++;
 
         if (isGone(c)) {
           creatures.splice(i, 1);
@@ -290,6 +322,9 @@ function draw(ctx: CanvasRenderingContext2D, c: Creature) {
       break;
     case "shoal":
       drawShoal(ctx, c);
+      break;
+    case "eyes":
+      drawEyes(ctx, c);
       break;
   }
 
@@ -432,9 +467,100 @@ const FISH_FRAMES: string[][] = [
   ],
 ];
 
+/*
+  The leviathan.
+
+  Only ever its eyes. There is no body sprite, and that's deliberate: a drawn
+  sea monster is a cartoon, whereas two slit pupils opening in the dark and
+  closing again leaves the size of the thing to whoever is looking. It also
+  means it can be enormous without costing anything to draw.
+
+  Amber rather than the cyan everything else in this ocean uses, so it reads as
+  something that doesn't belong to the same palette as the scenery.
+*/
+
+const EYE_COLORS: Record<string, string> = {
+  E: "#e8c46a",
+  P: "#0a1218",
+  H: "#fff6d8",
+};
+
+/** Open, mid-blink, shut. */
+const EYE_FRAMES: string[][] = [
+  [
+    "     EEEEEE     ",
+    "  EEHEEEEEEEE   ",
+    " EEEEEEPPEEEEE  ",
+    "EEEEEEEPPEEEEEEE",
+    " EEEEEEPPEEEEE  ",
+    "  EEEEEEEEEEE   ",
+    "     EEEEEE     ",
+  ],
+  [
+    "                ",
+    "                ",
+    "  EEEEEEEEEEE   ",
+    "EEEEEEEPPEEEEEEE",
+    "  EEEEEEEEEEE   ",
+    "                ",
+    "                ",
+  ],
+  [
+    "                ",
+    "                ",
+    "                ",
+    "  EEEEEEEEEEEE  ",
+    "                ",
+    "                ",
+    "                ",
+  ],
+];
+
+/** Half the gap between the two eyes, in sprite pixels. */
+const EYE_SPACING = 15;
+
+/**
+ * Frames the eyes exist for: ~2.5s opening, ~7s watching, ~2.5s closing at
+ * 60fps. Long enough to notice out of the corner of your eye, short enough that
+ * you can't be certain.
+ */
+const EYES_LIFESPAN = 720;
+const EYES_FADE = 150;
+
 /** Pick an animation frame from a creature's phase. */
 function frameOf(count: number, phase: number, speed = 1): number {
   return Math.floor(phase * speed) % count;
+}
+
+/**
+ * A pair of eyes fading up out of the dark, blinking, and fading back.
+ *
+ * Overrides the caller's alpha and horizontal flip: the fade envelope is the
+ * whole effect, and a mirrored pair of symmetric eyes would look identical
+ * anyway while putting the highlight on the wrong side.
+ */
+function drawEyes(ctx: CanvasRenderingContext2D, c: Creature) {
+  // Triangular envelope, clamped flat across the middle.
+  const fadeIn = Math.min(1, c.life / EYES_FADE);
+  const fadeOut = Math.min(1, (c.lifespan - c.life) / EYES_FADE);
+  ctx.globalAlpha = 0.34 * Math.min(fadeIn, fadeOut);
+
+  // Undo the flip `draw` applied, keeping the scale.
+  if (c.vx < 0) ctx.scale(-1, 1);
+
+  // Blink on a slow cycle with a per-creature offset, so two sightings don't
+  // blink in step. Shut for a handful of frames out of every few hundred.
+  const t = (c.life + c.seed) % 260;
+  const frame = t < 244 ? 0 : t < 250 ? 1 : t < 254 ? 2 : 1;
+
+  for (const side of [-1, 1] as const) {
+    ctx.save();
+    ctx.translate(side * EYE_SPACING * PIXEL, 0);
+    // Mirror the right eye so the highlights face each other.
+    if (side === 1) ctx.scale(-1, 1);
+    blit(ctx, EYE_FRAMES[frame], EYE_COLORS);
+    ctx.restore();
+  }
 }
 
 function drawShark(ctx: CanvasRenderingContext2D, c: Creature) {

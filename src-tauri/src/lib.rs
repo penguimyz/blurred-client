@@ -39,6 +39,11 @@ pub fn run() {
                 });
             }
 
+            // Brings crashed servers back up for anyone who asked for it.
+            // Started here so the queue exists before any server can be
+            // launched — see `servers::start_restart_worker`.
+            crate::commands::servers::start_restart_worker(app.handle().clone());
+
             // OS-level blur-behind for the glass theme. Without it,
             // `transparent: true` in tauri.conf.json just gives you a
             // see-through window with no blur -- the CSS backdrop-filter only
@@ -67,6 +72,8 @@ pub fn run() {
             commands::instance::delete_instance,
             commands::instance::launch_instance,
             commands::instance::list_detected_java,
+            commands::java_runtime::plan_java,
+            commands::java_runtime::install_java_runtime,
             commands::instance::get_instance,
             commands::instance::update_instance,
             commands::instance::kill_instance,
@@ -88,6 +95,10 @@ pub fn run() {
             commands::content::read_screenshot_data,
             commands::settings::get_settings,
             commands::settings::update_settings,
+            commands::import::detect_import_sources,
+            commands::import::scan_import_folder,
+            commands::import::import_instance,
+            commands::import::import_into_instance,
             commands::modpacks::list_modpacks,
             commands::modpacks::create_modpack_from_instance,
             commands::modpacks::delete_modpack,
@@ -148,6 +159,14 @@ pub fn run() {
             commands::servers::kill_server,
             commands::servers::server_command,
             commands::servers::server_statuses,
+            commands::server_admin::list_server_players,
+            commands::server_admin::add_server_player,
+            commands::server_admin::remove_server_player,
+            commands::server_admin::kick_server_player,
+            commands::server_admin::list_server_backups,
+            commands::server_admin::create_server_backup,
+            commands::server_admin::restore_server_backup,
+            commands::server_admin::delete_server_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running blurred client");

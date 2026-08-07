@@ -12,6 +12,16 @@ public record Friend(String nick, String note, boolean online, String status, St
         return "accepted".equals(status);
     }
 
+    /** They asked us, and we haven't answered yet. */
+    public boolean isPendingIn() {
+        return "pendingIn".equals(status);
+    }
+
+    /** We asked them, and they haven't answered yet. */
+    public boolean isPendingOut() {
+        return "pendingOut".equals(status);
+    }
+
     public boolean isJoinable() {
         return online && server != null && !server.isBlank();
     }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Icon";
+import { useBubbleCount } from "../lib/bubbleCounter";
 
 // Custom window chrome. The app runs with `decorations: false` +
 // `transparent: true` (tauri.conf.json) for the frosted-glass look, so there is
@@ -43,6 +44,58 @@ function Icon({ kind }: { kind: "min" | "max" | "restore" | "close" }) {
   }
 }
 
+/**
+ * Lifetime bubble-pop tally.
+ *
+ * Hidden until the first pop rather than showing a permanent "0": a counter
+ * nobody has started is chrome, and the point of this is that it appears once
+ * you've discovered the bubbles are clickable.
+ *
+ * The little ring is drawn rather than an emoji so it matches the pixel bubbles
+ * on the canvas at any DPI.
+ */
+function BubbleTally() {
+  const count = useBubbleCount();
+  const [bumped, setBumped] = useState(false);
+  const previous = useRef(count);
+
+  // Flash on each pop. Keyed off a change in the value, so mounting with a
+  // large stored count doesn't animate.
+  useEffect(() => {
+    if (count === previous.current) return;
+    previous.current = count;
+    setBumped(true);
+    const t = window.setTimeout(() => setBumped(false), 220);
+    return () => window.clearTimeout(t);
+  }, [count]);
+
+  if (count === 0) return null;
+
+  return (
+    <span
+      className="titlebar-bubbles"
+      data-tauri-drag-region
+      title={`${count.toLocaleString()} bubble${count === 1 ? "" : "s"} popped`}
+      style={{
+        transform: bumped ? "scale(1.18)" : "scale(1)",
+        color: bumped ? "var(--accent)" : undefined,
+      }}
+    >
+      <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden focusable="false">
+        {/* A pixel ring: four edge blocks plus a highlight, same read as the
+            bubbles on the canvas. */}
+        <rect x="3" y="0" width="3" height="1.5" fill="currentColor" />
+        <rect x="3" y="7.5" width="3" height="1.5" fill="currentColor" />
+        <rect x="0" y="3" width="1.5" height="3" fill="currentColor" />
+        <rect x="7.5" y="3" width="1.5" height="3" fill="currentColor" />
+        <rect x="1.5" y="1.5" width="1.5" height="1.5" fill="currentColor" />
+        <rect x="6" y="6" width="1.5" height="1.5" fill="currentColor" />
+      </svg>
+      {count.toLocaleString()}
+    </span>
+  );
+}
+
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
 
@@ -64,6 +117,7 @@ export function TitleBar() {
       <div className="titlebar-title" data-tauri-drag-region>
         <Logo size={15} />
         Blurred Client
+        <BubbleTally />
       </div>
       <div className="titlebar-controls">
         <button className="tb-btn" onClick={() => appWindow.minimize()} title="Minimize" aria-label="Minimize">

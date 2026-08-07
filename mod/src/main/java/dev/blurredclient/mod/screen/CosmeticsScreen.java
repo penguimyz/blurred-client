@@ -1,6 +1,7 @@
 package dev.blurredclient.mod.screen;
 
 import dev.blurredclient.mod.Theme;
+import dev.blurredclient.mod.ui.BlurredFont;
 import dev.blurredclient.mod.bridge.CapeEntry;
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.config.BlurredConfig;
@@ -32,7 +33,7 @@ public class CosmeticsScreen extends Screen {
     private int scroll;
 
     public CosmeticsScreen(Screen parent) {
-        super(Text.literal("Cosmetics"));
+        super(BlurredFont.of("Cosmetics"));
         this.parent = parent;
     }
 
@@ -49,7 +50,7 @@ public class CosmeticsScreen extends Screen {
             boolean worn = cape.id().equals(bridge.wornCapeId());
 
             this.addDrawableChild(ButtonWidget.builder(
-                            Text.literal(worn ? "Worn" : "Wear"),
+                            BlurredFont.of(worn ? "Worn" : "Wear"),
                             b -> {
                                 bridge.wearCape(worn ? null : cape.id());
                                 // Optimistic: the launcher echoes the change
@@ -63,7 +64,7 @@ public class CosmeticsScreen extends Screen {
         }
 
         this.addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Take cape off"),
+                        BlurredFont.of("Take cape off"),
                         b -> {
                             bridge.wearCape(null);
                             this.clearAndInit();
@@ -72,7 +73,7 @@ public class CosmeticsScreen extends Screen {
                 .build());
 
         this.addDrawableChild(ButtonWidget.builder(
-                        Text.literal(BlurredConfig.get().showCapes ? "Capes: on" : "Capes: off"),
+                        BlurredFont.of(BlurredConfig.get().showCapes ? "Capes: on" : "Capes: off"),
                         b -> {
                             BlurredConfig cfg = BlurredConfig.get();
                             cfg.showCapes = !cfg.showCapes;
@@ -83,7 +84,7 @@ public class CosmeticsScreen extends Screen {
                 .build());
 
         this.addDrawableChild(ButtonWidget.builder(
-                        Text.literal("Done"), b -> this.close())
+                        BlurredFont.of("Done"), b -> this.close())
                 .dimensions(this.width / 2 + 55, this.height - 52, 100, 20)
                 .build());
     }
@@ -119,12 +120,12 @@ public class CosmeticsScreen extends Screen {
         int logoW = OceanUi.logoWidth(this.textRenderer, 12);
         OceanUi.logo(ctx, this.textRenderer, (this.width - logoW) / 2, 14, 12);
         ctx.drawCenteredTextWithShadow(
-                this.textRenderer, Text.literal("COSMETICS"), this.width / 2, 34, Theme.TEXT_DIM);
+                this.textRenderer, BlurredFont.of("COSMETICS"), this.width / 2, 34, Theme.TEXT_DIM);
 
         if (!bridge.isLauncherReachable()) {
             ctx.drawCenteredTextWithShadow(
                     this.textRenderer,
-                    Text.literal("Launcher offline — start Blurred Client to manage capes"),
+                    BlurredFont.of("Launcher offline — start Blurred Client to manage capes"),
                     this.width / 2, this.height / 2, Theme.WARNING);
             return;
         }
@@ -133,7 +134,7 @@ public class CosmeticsScreen extends Screen {
         if (capes.isEmpty()) {
             ctx.drawCenteredTextWithShadow(
                     this.textRenderer,
-                    Text.literal("No capes yet — draw one in the launcher's Cosmetics tab"),
+                    BlurredFont.of("No capes yet — draw one in the launcher's Cosmetics tab"),
                     this.width / 2, this.height / 2, Theme.TEXT_FAINT);
             return;
         }
@@ -143,7 +144,7 @@ public class CosmeticsScreen extends Screen {
             CapeEntry cape = capes.get(i);
             boolean worn = cape.id().equals(bridge.wornCapeId());
 
-            OceanUi.button(ctx, this.textRenderer, Text.literal(""),
+            OceanUi.button(ctx, this.textRenderer, BlurredFont.of(""),
                     panelX, y, panelW, 24, false, true);
 
             // A marker block rather than a texture preview of the cape.
@@ -161,7 +162,7 @@ public class CosmeticsScreen extends Screen {
                 ctx.fill(panelX + 9, y + 11, panelX + 15, y + 13, 0x66041824);
             }
 
-            ctx.drawTextWithShadow(this.textRenderer, Text.literal(cape.name()),
+            ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of(cape.name()),
                     panelX + 26, y + 8, worn ? Theme.ACCENT : Theme.TEXT);
 
             y += 26;
@@ -169,7 +170,7 @@ public class CosmeticsScreen extends Screen {
 
         ctx.drawCenteredTextWithShadow(
                 this.textRenderer,
-                Text.literal("Capes show to other Blurred Client players only"),
+                BlurredFont.of("Capes show to other Blurred Client players only"),
                 this.width / 2, this.height - 30, Theme.TEXT_FAINT);
 
     }

@@ -64,6 +64,12 @@ pub struct VersionDetail {
 pub struct JavaVersionReq {
     #[serde(rename = "majorVersion")]
     pub major_version: u32,
+    /// Mojang's name for the exact runtime build, e.g. `java-runtime-delta`.
+    /// This is what `commands::java_runtime` downloads, so taking it from the
+    /// version JSON means we fetch precisely the JRE the version was tested
+    /// against rather than inferring one from the major number.
+    #[serde(default)]
+    pub component: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

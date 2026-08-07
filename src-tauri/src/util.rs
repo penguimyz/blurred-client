@@ -54,3 +54,16 @@ pub fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     }
     Ok(out)
 }
+
+/// Lowercase hex SHA-1 of some bytes.
+///
+/// Mojang publishes a SHA-1 next to every file it serves — libraries, assets,
+/// and the Java runtimes. Verifying is worth the few microseconds: a truncated
+/// download produces a failure at launch that looks like anything except a bad
+/// file, and costs far more to diagnose than to prevent.
+pub fn sha1_hex(bytes: &[u8]) -> String {
+    use sha1::{Digest, Sha1};
+    let mut hasher = Sha1::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}

@@ -32,6 +32,13 @@ const XSTS_URL: &str = "https://xsts.auth.xboxlive.com/xsts/authorize";
 const MC_LOGIN_URL: &str = "https://api.minecraftservices.com/authentication/login_with_xbox";
 const MC_PROFILE_URL: &str = "https://api.minecraftservices.com/minecraft/profile";
 const SCOPE: &str = "XboxLive.signin offline_access";
+/// Service name for the OS keychain entries holding Microsoft refresh tokens.
+///
+/// This deliberately still reads `.app` even though the bundle identifier is
+/// now `dev.blurredclient.launcher`. It is not the bundle identifier — it just
+/// happened to be spelled the same — and it is the key existing installs
+/// already stored their tokens under. Changing it to match would orphan every
+/// saved token and silently sign everyone out on upgrade, for no benefit.
 const KEYRING_SERVICE: &str = "dev.blurredclient.app";
 
 // ---- keychain ----

@@ -1,6 +1,8 @@
 {
   "category.blurred": "Blurred",
   "key.blurred.crew": "Open crew & chat",
+  "key.blurred.settings": "Open Blurred settings",
   "menu.blurred.crew": "Crew",
-  "menu.blurred.cosmetics": "Cosmetics"
+  "menu.blurred.cosmetics": "Cosmetics",
+  "menu.blurred.settings": "Settings"
 }

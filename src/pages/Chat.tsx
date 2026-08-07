@@ -397,7 +397,7 @@ export function Chat() {
             setShowAddFriend(false);
           }}
           noteLabel="Say hello (optional)"
-          notePlaceholder="e.g. it's penguimyz from the SMP"
+          notePlaceholder={`e.g. it's ${nick || "you"} from the SMP`}
           withNote
         />
       )}

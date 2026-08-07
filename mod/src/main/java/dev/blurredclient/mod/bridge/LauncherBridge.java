@@ -4,6 +4,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.blurredclient.mod.BlurredMod;
 import dev.blurredclient.mod.cosmetic.CapeManager;
+import dev.blurredclient.mod.social.BlurredUsers;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -112,6 +113,9 @@ public final class LauncherBridge {
             // know if they're still current, so drop them rather than show a
             // stale cosmetic. Ours comes straight back on reconnect.
             CapeManager.clear();
+            // Same reasoning for the badge: without the launcher we no longer
+            // know who's on Blurred, and a stale badge is a wrong claim.
+            BlurredUsers.clear();
 
             try {
                 Thread.sleep(RECONNECT_DELAY_MS);
@@ -141,6 +145,11 @@ public final class LauncherBridge {
 
             this.writer = out;
             this.launcherReachable = true;
+            // The launcher's record of where we're playing died with the last
+            // connection, so make the game state the source of truth again.
+            // Without this, restarting the launcher mid-session leaves the crew
+            // unable to join a server we never stopped being on.
+            BlurredMod.onBridgeConnected();
             BlurredMod.LOGGER.info("Connected to Blurred Client on port {}", port);
 
             String line;
@@ -214,6 +223,19 @@ public final class LauncherBridge {
                     lastIncoming = msg;
                 }
             }
+            // Everyone currently in the Blurred lobby, i.e. everyone we can be
+            // sure is running this client. Drives the in-game badge.
+            case "users" -> {
+                List<String> next = new ArrayList<>();
+                if (o.has("users")) {
+                    o.getAsJsonArray("users").forEach(el -> next.add(el.getAsString()));
+                }
+                BlurredUsers.setAll(next);
+            }
+            // Incremental roster changes between full pushes, so someone who
+            // starts their launcher mid-session gets badged without waiting.
+            case "userJoined" -> BlurredUsers.add(strOr(o, "user", ""));
+            case "userLeft" -> BlurredUsers.remove(strOr(o, "user", ""));
             // A cape for some player — ours or anyone else's. `data` null means
             // they took it off.
             case "cape" -> {
@@ -221,6 +243,11 @@ public final class LauncherBridge {
                 String data = str(o, "data");
                 if (!who.isBlank()) {
                     CapeManager.put(who, data);
+                    // Having their cape is proof they're on Blurred, and it
+                    // arrives sooner than the next lobby roster.
+                    if (data != null) {
+                        BlurredUsers.add(who);
+                    }
                 }
             }
             // Bulk delivery on connect, so a player already in view gets their
@@ -228,8 +255,10 @@ public final class LauncherBridge {
             case "capes" -> {
                 JsonObject all = o.getAsJsonObject("capes");
                 if (all != null) {
-                    all.entrySet().forEach(e ->
-                            CapeManager.put(e.getKey(), e.getValue().getAsString()));
+                    all.entrySet().forEach(e -> {
+                        CapeManager.put(e.getKey(), e.getValue().getAsString());
+                        BlurredUsers.add(e.getKey());
+                    });
                 }
             }
             // Your cape library + which one is worn, for the in-game picker.
@@ -303,6 +332,42 @@ public final class LauncherBridge {
         write(o);
     }
 
+    /**
+     * Ask to join someone's crew.
+     *
+     * <p>The launcher owns the handshake — this only says who. Fire and forget:
+     * the answer comes back as a roster push or, if it couldn't be sent, as a
+     * system line in the transcript, both of which the crew screen already
+     * shows. There is nothing useful for the mod to do with a return value it
+     * would have to invent a request/response protocol to receive.
+     */
+    public void addFriend(String nick, String note) {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "addFriend");
+        o.addProperty("nick", nick);
+        o.addProperty("note", note == null ? "" : note);
+        write(o);
+    }
+
+    /** Accept a request someone sent us. */
+    public void acceptFriend(String nick) {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "acceptFriend");
+        o.addProperty("nick", nick);
+        write(o);
+    }
+
+    /**
+     * Turn down an incoming request, or withdraw one of ours — the same button
+     * either way, because from the user's side both are "make this go away".
+     */
+    public void declineFriend(String nick) {
+        JsonObject o = new JsonObject();
+        o.addProperty("t", "declineFriend");
+        o.addProperty("nick", nick);
+        write(o);
+    }
+
     private void write(JsonObject o) {
         BufferedWriter w = this.writer;
         if (w == null) {
@@ -355,6 +420,25 @@ public final class LauncherBridge {
             }
             return a.nick().compareToIgnoreCase(b.nick());
         });
+        return out;
+    }
+
+    /**
+     * Requests waiting on someone: incoming first, because those are the ones
+     * that need a decision, then the ones we've sent and are waiting on.
+     */
+    public List<Friend> pending() {
+        List<Friend> out = new ArrayList<>();
+        for (Friend f : friends) {
+            if (f.isPendingIn()) {
+                out.add(f);
+            }
+        }
+        for (Friend f : friends) {
+            if (f.isPendingOut()) {
+                out.add(f);
+            }
+        }
         return out;
     }
 

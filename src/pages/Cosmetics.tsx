@@ -7,6 +7,7 @@ import { useAccountStore } from "../store/accountStore";
 import * as api from "../lib/tauri";
 import { open } from "@tauri-apps/plugin-dialog";
 import { CAPE_AREA, CAPE_SHEET_H, CAPE_SHEET_W, type Cape } from "../types/cape";
+import * as raster from "../lib/capeRaster";
 
 /**
  * Cosmetics: a cape maker and a skin changer.
@@ -70,9 +71,6 @@ function TabButton({
 // ---------------------------------------------------------------------------
 // Capes
 // ---------------------------------------------------------------------------
-
-/** Editor zoom: one cape pixel is this many screen pixels. */
-const ZOOM = 14;
 
 const PALETTE = [
   "#0b1e2a", "#123344", "#1b5566", "#2a8fa0", "#35e0d0", "#9df3ea",
@@ -280,11 +278,29 @@ function CapePreview({ base64, scale }: { base64: string; scale: number }) {
 /**
  * The cape editor.
  *
- * Pixels live in a flat `string[]` of CSS colours (empty = transparent), which
- * is simple to mutate and simple to serialise. The canvas is only a view: every
- * edit updates the array and repaints, so undo is a matter of keeping previous
- * arrays rather than reading pixels back off the canvas.
+ * # It only shows the cape
+ *
+ * A cape sheet is 64x32, of which the cape is the 10x16 block at (1,1) — the
+ * rest is the elytra texture and dead padding. The editor used to show the
+ * whole sheet with that block outlined, which meant 95% of the canvas was
+ * space where painting did nothing visible. Now the canvas *is* the cape,
+ * blown up large enough to work on, and the sheet is assembled at save time.
+ *
+ * Editing an existing cape keeps whatever was in the rest of its sheet
+ * untouched, so cropping the view never silently discards an elytra someone
+ * imported.
+ *
+ * # Two painting modes
+ *
+ * Pixel art mode is hard whole-pixel painting, which is what a cape at this
+ * resolution usually wants. Smooth mode is a soft, partially-transparent brush
+ * that builds up — worth having for shading, gradients and glows, which are
+ * miserable to place by hand one pixel at a time. See {@link raster.stamp}.
  */
+
+/** Editor zoom for the cropped view: one cape pixel is this many screen px. */
+const CAPE_ZOOM = 30;
+
 function CapeEditor({
   capeId,
   initialName,
@@ -298,123 +314,199 @@ function CapeEditor({
 }) {
   const [name, setName] = useState(initialName);
   const [color, setColor] = useState(PALETTE[4]);
-  const [tool, setTool] = useState<"pen" | "eraser" | "fill">("pen");
-  const [pixels, setPixels] = useState<string[]>(() =>
-    new Array(CAPE_SHEET_W * CAPE_SHEET_H).fill("")
-  );
-  const [history, setHistory] = useState<string[][]>([]);
+  const [tool, setTool] = useState<"pen" | "eraser" | "fill" | "picker">("pen");
+  const [mode, setMode] = useState<"pixel" | "smooth">("pixel");
+  const [brushSize, setBrushSize] = useState(1);
+  const [opacity, setOpacity] = useState(0.6);
+  const [tolerance, setTolerance] = useState(0.12);
+  const [contiguous, setContiguous] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+
+  const [data, setData] = useState<Uint8ClampedArray>(() => raster.emptyCape());
+  const [history, setHistory] = useState<Uint8ClampedArray[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const painting = useRef(false);
+  const lastPoint = useRef<{ x: number; y: number } | null>(null);
+  /**
+   * The rest of the sheet for the cape being edited — everything outside the
+   * cape block. Held so saving can put the cape back into its original sheet
+   * rather than onto a blank one.
+   */
+  const sheetRef = useRef<ImageData | null>(null);
 
-  // Load an existing cape into the grid.
+  // Load an existing cape: the cape block into the editable buffer, the whole
+  // sheet into sheetRef so the elytra survives a round trip.
   useEffect(() => {
     if (!capeId) return;
-    api.readCape(capeId).then((b64) => {
-      const img = new Image();
-      img.onload = () => {
-        const off = document.createElement("canvas");
-        off.width = CAPE_SHEET_W;
-        off.height = CAPE_SHEET_H;
-        const octx = off.getContext("2d");
-        if (!octx) return;
-        octx.drawImage(img, 0, 0);
-        const data = octx.getImageData(0, 0, CAPE_SHEET_W, CAPE_SHEET_H).data;
-        const next = new Array(CAPE_SHEET_W * CAPE_SHEET_H).fill("");
-        for (let i = 0; i < next.length; i++) {
-          const a = data[i * 4 + 3];
-          if (a > 8) {
-            next[i] = `#${[0, 1, 2]
-              .map((k) => data[i * 4 + k].toString(16).padStart(2, "0"))
-              .join("")}`;
-          }
-        }
-        setPixels(next);
-      };
-      img.src = `data:image/png;base64,${b64}`;
-    }).catch(() => {});
+    let cancelled = false;
+
+    api
+      .readCape(capeId)
+      .then((b64) => {
+        const img = new Image();
+        img.onload = () => {
+          if (cancelled) return;
+          const off = document.createElement("canvas");
+          off.width = CAPE_SHEET_W;
+          off.height = CAPE_SHEET_H;
+          const octx = off.getContext("2d");
+          if (!octx) return;
+          octx.drawImage(img, 0, 0);
+          sheetRef.current = octx.getImageData(0, 0, CAPE_SHEET_W, CAPE_SHEET_H);
+          setData(
+            new Uint8ClampedArray(
+              octx.getImageData(CAPE_AREA.x, CAPE_AREA.y, CAPE_AREA.w, CAPE_AREA.h).data
+            )
+          );
+        };
+        img.src = `data:image/png;base64,${b64}`;
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
   }, [capeId]);
 
-  // Repaint whenever the grid changes.
+  // Repaint whenever the buffer changes.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Checkerboard so transparent pixels are visibly transparent.
-    for (let y = 0; y < CAPE_SHEET_H; y++) {
-      for (let x = 0; x < CAPE_SHEET_W; x++) {
+    // Checkerboard, at cape-pixel scale, so transparency is legible.
+    for (let y = 0; y < raster.CAPE_H; y++) {
+      for (let x = 0; x < raster.CAPE_W; x++) {
         ctx.fillStyle = (x + y) % 2 === 0 ? "#0d2531" : "#0a1c26";
-        ctx.fillRect(x * ZOOM, y * ZOOM, ZOOM, ZOOM);
+        ctx.fillRect(x * CAPE_ZOOM, y * CAPE_ZOOM, CAPE_ZOOM, CAPE_ZOOM);
       }
     }
 
-    for (let i = 0; i < pixels.length; i++) {
-      const c = pixels[i];
-      if (!c) continue;
-      const x = i % CAPE_SHEET_W;
-      const y = Math.floor(i / CAPE_SHEET_W);
-      ctx.fillStyle = c;
-      ctx.fillRect(x * ZOOM, y * ZOOM, ZOOM, ZOOM);
+    // Blit the buffer through a 1:1 offscreen canvas and scale it up with
+    // smoothing off. Drawing 160 individual rects would also work, but this
+    // keeps partial alpha exact instead of round-tripping it through
+    // `fillStyle` strings.
+    const off = document.createElement("canvas");
+    off.width = raster.CAPE_W;
+    off.height = raster.CAPE_H;
+    const octx = off.getContext("2d");
+    if (!octx) return;
+    octx.putImageData(new ImageData(new Uint8ClampedArray(data), raster.CAPE_W, raster.CAPE_H), 0, 0);
+
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(off, 0, 0, canvas.width, canvas.height);
+
+    if (showGrid) {
+      // Hairline grid. Off in smooth mode by default, where cell boundaries
+      // are not what you're looking at.
+      ctx.strokeStyle = "rgba(125,226,240,0.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let x = 1; x < raster.CAPE_W; x++) {
+        ctx.moveTo(x * CAPE_ZOOM + 0.5, 0);
+        ctx.lineTo(x * CAPE_ZOOM + 0.5, canvas.height);
+      }
+      for (let y = 1; y < raster.CAPE_H; y++) {
+        ctx.moveTo(0, y * CAPE_ZOOM + 0.5);
+        ctx.lineTo(canvas.width, y * CAPE_ZOOM + 0.5);
+      }
+      ctx.stroke();
     }
 
-    // Outline the region that actually shows on a cape.
+    // Frame the canvas so the cape's own edge is unambiguous against the card.
     ctx.strokeStyle = "#35e0d0";
     ctx.lineWidth = 2;
-    ctx.strokeRect(
-      CAPE_AREA.x * ZOOM, CAPE_AREA.y * ZOOM,
-      CAPE_AREA.w * ZOOM, CAPE_AREA.h * ZOOM
-    );
-  }, [pixels]);
+    ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+  }, [data, showGrid]);
 
-  const pushHistory = useCallback(() => {
-    setHistory((h) => [...h.slice(-24), pixels]);
-  }, [pixels]);
+  const brush = useMemo<raster.Brush>(
+    () => ({
+      soft: mode === "smooth",
+      size: brushSize,
+      opacity,
+      color: raster.hexToRgb(color),
+      erase: tool === "eraser",
+    }),
+    [mode, brushSize, opacity, color, tool]
+  );
 
-  function pointToIndex(e: React.MouseEvent<HTMLCanvasElement>): number | null {
+  /** Cape-pixel coordinates, fractional — the soft brush needs sub-pixel aim. */
+  function pointAt(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / ZOOM);
-    const y = Math.floor((e.clientY - rect.top) / ZOOM);
-    if (x < 0 || y < 0 || x >= CAPE_SHEET_W || y >= CAPE_SHEET_H) return null;
-    return y * CAPE_SHEET_W + x;
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * raster.CAPE_W,
+      y: ((e.clientY - rect.top) / rect.height) * raster.CAPE_H,
+    };
   }
 
-  function paintAt(idx: number) {
-    setPixels((prev) => {
-      if (tool === "fill") return floodFill(prev, idx, color);
-      const next = [...prev];
-      next[idx] = tool === "eraser" ? "" : color;
+  function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    const p = pointAt(e);
+
+    if (tool === "picker") {
+      const hex = raster.pick(data, Math.floor(p.x), Math.floor(p.y));
+      if (hex) setColor(hex);
+      // Snap back to the pen: an eyedropper you have to switch away from
+      // manually is one extra click on every single use.
+      setTool("pen");
+      return;
+    }
+
+    setHistory((h) => [...h.slice(-31), new Uint8ClampedArray(data)]);
+
+    if (tool === "fill") {
+      setData(
+        raster.bucketFill(data, Math.floor(p.x), Math.floor(p.y), raster.hexToRgb(color), {
+          tolerance,
+          contiguous,
+          erase: false,
+        })
+      );
+      return;
+    }
+
+    painting.current = true;
+    lastPoint.current = p;
+    const next = new Uint8ClampedArray(data);
+    raster.stamp(next, p.x, p.y, brush);
+    setData(next);
+  }
+
+  function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!painting.current) return;
+    const p = pointAt(e);
+    const from = lastPoint.current ?? p;
+    lastPoint.current = p;
+
+    setData((prev) => {
+      const next = new Uint8ClampedArray(prev);
+      raster.stroke(next, from.x, from.y, p.x, p.y, brush);
       return next;
     });
   }
 
-  function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    const idx = pointToIndex(e);
-    if (idx === null) return;
-    pushHistory();
-    painting.current = true;
-    paintAt(idx);
-  }
-
-  function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!painting.current || tool === "fill") return;
-    const idx = pointToIndex(e);
-    if (idx !== null) paintAt(idx);
+  function endStroke() {
+    painting.current = false;
+    lastPoint.current = null;
   }
 
   function undo() {
     setHistory((h) => {
       if (h.length === 0) return h;
-      setPixels(h[h.length - 1]);
+      setData(h[h.length - 1]);
       return h.slice(0, -1);
     });
   }
 
-  /** Rasterise the grid to a PNG and hand the base64 to the backend. */
+  function clear() {
+    setHistory((h) => [...h.slice(-31), new Uint8ClampedArray(data)]);
+    setData(raster.emptyCape());
+  }
+
+  /** Compose the cape back into a full sheet, encode it, hand it to the backend. */
   async function save() {
     setBusy(true);
     setError(null);
@@ -425,12 +517,18 @@ function CapeEditor({
       const ctx = off.getContext("2d");
       if (!ctx) throw new Error("could not get a canvas context");
 
-      for (let i = 0; i < pixels.length; i++) {
-        const c = pixels[i];
-        if (!c) continue;
-        ctx.fillStyle = c;
-        ctx.fillRect(i % CAPE_SHEET_W, Math.floor(i / CAPE_SHEET_W), 1, 1);
-      }
+      // Start from the original sheet when editing, so the elytra half and
+      // anything else outside the cape block is preserved.
+      if (sheetRef.current) ctx.putImageData(sheetRef.current, 0, 0);
+
+      // putImageData ignores compositing and writes the block verbatim, which
+      // is what's wanted: the editor buffer is the whole truth for this region,
+      // including its transparent pixels.
+      ctx.putImageData(
+        new ImageData(new Uint8ClampedArray(data), raster.CAPE_W, raster.CAPE_H),
+        CAPE_AREA.x,
+        CAPE_AREA.y
+      );
 
       // Strip the `data:image/png;base64,` prefix — the backend wants raw base64.
       const b64 = off.toDataURL("image/png").split(",")[1];
@@ -461,9 +559,7 @@ function CapeEditor({
         </button>
         <button onClick={onCancel} disabled={busy}>Cancel</button>
         <button onClick={undo} disabled={history.length === 0}>Undo</button>
-        <button onClick={() => { pushHistory(); setPixels(new Array(CAPE_SHEET_W * CAPE_SHEET_H).fill("")); }}>
-          Clear
-        </button>
+        <button onClick={clear}>Clear</button>
       </div>
 
       {error && (
@@ -474,45 +570,142 @@ function CapeEditor({
         <GlassCard style={{ padding: 12 }}>
           <canvas
             ref={canvasRef}
-            width={CAPE_SHEET_W * ZOOM}
-            height={CAPE_SHEET_H * ZOOM}
+            width={raster.CAPE_W * CAPE_ZOOM}
+            height={raster.CAPE_H * CAPE_ZOOM}
             onMouseDown={onDown}
             onMouseMove={onMove}
-            onMouseUp={() => (painting.current = false)}
-            onMouseLeave={() => (painting.current = false)}
-            style={{ imageRendering: "pixelated", cursor: "crosshair", display: "block" }}
+            onMouseUp={endStroke}
+            onMouseLeave={endStroke}
+            style={{
+              imageRendering: "pixelated",
+              cursor: tool === "picker" ? "copy" : "crosshair",
+              display: "block",
+              touchAction: "none",
+            }}
           />
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 8 }}>
-            The outlined block is the part that shows on your back. The rest of the sheet is the
-            elytra texture.
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 8, maxWidth: 300 }}>
+            This is the whole cape — {raster.CAPE_W}×{raster.CAPE_H} pixels, exactly what shows on
+            your back. The elytra half of the sheet is left as it was.
           </div>
         </GlassCard>
 
-        <GlassCard style={{ padding: 12, width: 190 }}>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 8, textTransform: "uppercase" }}>
-            Tool
+        <GlassCard style={{ padding: 12, width: 210 }}>
+          <SidebarLabel>Mode</SidebarLabel>
+          <div style={{ display: "flex", gap: 5, marginBottom: 6 }}>
+            {(["pixel", "smooth"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => {
+                  setMode(m);
+                  // The grid is orientation for placing hard pixels and just
+                  // clutter over a gradient.
+                  setShowGrid(m === "pixel");
+                }}
+                style={{
+                  flex: 1,
+                  fontSize: 10.5,
+                  padding: "5px 2px",
+                  textTransform: "capitalize",
+                  background: mode === m ? "var(--accent)" : undefined,
+                  color: mode === m ? "var(--accent-fg)" : undefined,
+                }}
+              >
+                {m === "pixel" ? "Pixel art" : "Smooth"}
+              </button>
+            ))}
           </div>
-          <div style={{ display: "flex", gap: 5, marginBottom: 14 }}>
-            {(["pen", "fill", "eraser"] as const).map((t) => (
+          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 14, lineHeight: 1.5 }}>
+            {mode === "pixel"
+              ? "Hard whole pixels. Painting the same spot twice changes nothing."
+              : "A soft brush that builds up as you go, for shading and glows."}
+          </div>
+
+          <SidebarLabel>Tool</SidebarLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 4, marginBottom: 14 }}>
+            {(["pen", "fill", "eraser", "picker"] as const).map((t) => (
               <button
                 key={t}
                 onClick={() => setTool(t)}
+                title={TOOL_HINTS[t]}
                 style={{
-                  flex: 1,
-                  fontSize: 10,
-                  padding: "5px 2px",
+                  fontSize: 9.5,
+                  padding: "5px 1px",
                   background: tool === t ? "var(--accent)" : undefined,
                   color: tool === t ? "var(--accent-fg)" : undefined,
                 }}
               >
-                {t}
+                {t === "picker" ? "pick" : t}
               </button>
             ))}
           </div>
 
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 8, textTransform: "uppercase" }}>
-            Colour
-          </div>
+          {tool !== "fill" && tool !== "picker" && (
+            <>
+              <SidebarLabel>Brush · {brushSize}px</SidebarLabel>
+              <input
+                type="range"
+                min={1}
+                max={8}
+                step={1}
+                value={brushSize}
+                onChange={(e) => setBrushSize(Number(e.target.value))}
+                style={sliderStyle}
+              />
+              {mode === "smooth" && (
+                <>
+                  <SidebarLabel>Flow · {Math.round(opacity * 100)}%</SidebarLabel>
+                  <input
+                    type="range"
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={Math.round(opacity * 100)}
+                    onChange={(e) => setOpacity(Number(e.target.value) / 100)}
+                    style={sliderStyle}
+                  />
+                </>
+              )}
+            </>
+          )}
+
+          {tool === "fill" && (
+            <>
+              <SidebarLabel>Tolerance · {Math.round(tolerance * 100)}%</SidebarLabel>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(tolerance * 100)}
+                onChange={(e) => setTolerance(Number(e.target.value) / 100)}
+                style={sliderStyle}
+              />
+              <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 10, lineHeight: 1.5 }}>
+                How different a neighbouring pixel can be and still be filled. Raise it to swallow
+                the soft edges a smooth brush leaves.
+              </div>
+              <label style={checkRow}>
+                <input
+                  type="checkbox"
+                  checked={contiguous}
+                  onChange={(e) => setContiguous(e.target.checked)}
+                />
+                <span>
+                  <div style={{ fontSize: 11 }}>Connected only</div>
+                  <div style={{ fontSize: 9.5, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
+                    Off, it recolours every matching pixel on the cape.
+                  </div>
+                </span>
+              </label>
+            </>
+          )}
+
+          <label style={{ ...checkRow, marginBottom: 12 }}>
+            <input type="checkbox" checked={showGrid} onChange={(e) => setShowGrid(e.target.checked)} />
+            <span style={{ fontSize: 11 }}>Show grid</span>
+          </label>
+
+          <SidebarLabel>Colour</SidebarLabel>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 4, marginBottom: 10 }}>
             {PALETTE.map((c) => (
               <button
@@ -543,30 +736,37 @@ function CapeEditor({
   );
 }
 
-/**
- * Flood fill, iterative rather than recursive — a 64x32 sheet is 2048 cells and
- * a recursive fill on a fully-empty sheet would blow the JS stack.
- */
-function floodFill(pixels: string[], start: number, color: string): string[] {
-  const target = pixels[start];
-  if (target === color) return pixels;
+const TOOL_HINTS: Record<"pen" | "fill" | "eraser" | "picker", string> = {
+  pen: "Paint",
+  fill: "Paint bucket",
+  eraser: "Erase back to transparent",
+  picker: "Pick a colour off the cape",
+};
 
-  const next = [...pixels];
-  const stack = [start];
-  while (stack.length) {
-    const i = stack.pop()!;
-    if (next[i] !== target) continue;
-    next[i] = color;
-
-    const x = i % CAPE_SHEET_W;
-    const y = Math.floor(i / CAPE_SHEET_W);
-    if (x > 0) stack.push(i - 1);
-    if (x < CAPE_SHEET_W - 1) stack.push(i + 1);
-    if (y > 0) stack.push(i - CAPE_SHEET_W);
-    if (y < CAPE_SHEET_H - 1) stack.push(i + CAPE_SHEET_W);
-  }
-  return next;
+function SidebarLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      style={{
+        fontSize: 10,
+        color: "var(--text-tertiary)",
+        marginBottom: 6,
+        textTransform: "uppercase",
+        letterSpacing: "0.05em",
+      }}
+    >
+      {children}
+    </div>
+  );
 }
+
+const sliderStyle: React.CSSProperties = { width: "100%", marginBottom: 12, accentColor: "var(--accent)" };
+const checkRow: React.CSSProperties = {
+  display: "flex",
+  gap: 7,
+  alignItems: "flex-start",
+  cursor: "pointer",
+  marginBottom: 14,
+};
 
 // ---------------------------------------------------------------------------
 // Skins

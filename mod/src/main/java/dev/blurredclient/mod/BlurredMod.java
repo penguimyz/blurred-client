@@ -3,8 +3,12 @@ package dev.blurredclient.mod;
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.config.BlurredConfig;
 import dev.blurredclient.mod.hud.HudRenderer;
+import dev.blurredclient.mod.screen.ConfigScreen;
 import dev.blurredclient.mod.screen.CosmeticsScreen;
 import dev.blurredclient.mod.screen.CrewScreen;
+import dev.blurredclient.mod.social.Essential;
+import dev.blurredclient.mod.social.LanWorlds;
+import dev.blurredclient.mod.ui.BlurredFont;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
@@ -41,8 +45,11 @@ public class BlurredMod implements ClientModInitializer {
     /**
      * Last server address reported to the launcher. Kept so the per-tick check
      * only sends on an actual change instead of every tick.
+     *
+     * <p>Volatile because {@link #onBridgeConnected} clears it from the bridge's
+     * reader thread while the client thread is reading it in {@link #trackServer}.
      */
-    private static String reportedServer = "";
+    private static volatile String reportedServer = "";
 
     @Override
     public void onInitializeClient() {
@@ -50,6 +57,12 @@ public class BlurredMod implements ClientModInitializer {
 
         BlurredConfig.get();
         LauncherBridge.get().start();
+
+        if (Essential.isPresent()) {
+            LOGGER.info(
+                    "Essential detected — Blurred will {} the menus. HUD, capes and crew are unaffected.",
+                    Essential.shouldStyleMenus() ? "still style" : "leave");
+        }
 
         // 1.21.9+ made categories a type rather than a translation key. MISC
         // rather than a custom category: a new Category has to be registered
@@ -91,20 +104,41 @@ public class BlurredMod implements ClientModInitializer {
             // so overlapping it is how added buttons end up unclickable — and
             // the bottom line is already taken by "Minecraft 1.21.11/Fabric".
             int x = 6;
-            int y = height - 74;
+            int y = height - 98;
 
             Screens.getButtons(screen).add(ButtonWidget.builder(
-                            Text.translatable("menu.blurred.crew"),
+                            BlurredFont.apply(Text.translatable("menu.blurred.crew")),
                             b -> client.setScreen(new CrewScreen()))
                     .dimensions(x, y, 92, 20)
                     .build());
 
             Screens.getButtons(screen).add(ButtonWidget.builder(
-                            Text.translatable("menu.blurred.cosmetics"),
+                            BlurredFont.apply(Text.translatable("menu.blurred.cosmetics")),
                             b -> client.setScreen(new CosmeticsScreen(screen)))
                     .dimensions(x, y + 24, 92, 20)
                     .build());
+
+            Screens.getButtons(screen).add(ButtonWidget.builder(
+                            BlurredFont.apply(Text.translatable("menu.blurred.settings")),
+                            b -> client.setScreen(new ConfigScreen(screen)))
+                    .dimensions(x, y + 48, 92, 20)
+                    .build());
         });
+    }
+
+    /**
+     * Forget what we last told the launcher, so the next tick re-sends it.
+     *
+     * <p>Called when the bridge connects. The launcher holds "where this player
+     * is" in memory only, so a launcher that restarted — or one that started
+     * after the game did — knows nothing, and the change detection in
+     * {@link #trackServer} would happily never mention the server we've been on
+     * for the last hour. Clearing the record turns the next tick into a fresh
+     * report.
+     */
+    public static void onBridgeConnected() {
+        reportedServer = "";
+        LanWorlds.reset();
     }
 
     private static void onTick(MinecraftClient client) {
@@ -116,27 +150,38 @@ public class BlurredMod implements ClientModInitializer {
     }
 
     /**
-     * Tell the launcher which server we're on so crew can join us.
+     * Report where we're playing, whether that's someone else's server or a
+     * world of ours that's open to LAN.
      *
-     * <p>Only fires on a change — joining, leaving, or switching servers — so
-     * the bridge isn't handed the same string twenty times a second. An empty
-     * string means singleplayer or the main menu, which correctly clears the
-     * "joinable" state on the other side.
+     * <p>Order matters: a real server wins. You cannot be connected to one and
+     * hosting the other at the same time, but checking the multiplayer case
+     * first means the transition on disconnect is a single clean change rather
+     * than a frame of ambiguity.
      */
     private static void trackServer(MinecraftClient client) {
         if (!BlurredConfig.get().shareServer) {
             if (!reportedServer.isEmpty()) {
                 reportedServer = "";
                 LauncherBridge.get().reportServer("");
+                LanWorlds.reset();
             }
             return;
         }
 
         ServerInfo entry = client.getCurrentServerEntry();
-        String current = entry == null ? "" : entry.address;
-        if (!current.equals(reportedServer)) {
-            reportedServer = current;
-            LauncherBridge.get().reportServer(current);
+        if (entry != null) {
+            LanWorlds.reset();
+            if (!entry.address.equals(reportedServer)) {
+                reportedServer = entry.address;
+                LauncherBridge.get().reportServer(reportedServer);
+            }
+            return;
         }
+
+        // Singleplayer: share the address only once the world is open to LAN.
+        // LanWorlds owns its own change detection, so this just mirrors the
+        // result into our record of what was last sent.
+        reportedServer = LanWorlds.poll(client);
     }
+
 }

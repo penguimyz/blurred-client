@@ -5,6 +5,7 @@ import { TitleBar } from "./components/TitleBar";
 import { FishSchool } from "./components/FishSchool";
 import { SeaLife } from "./components/SeaLife";
 import { Bubbles } from "./components/Bubbles";
+import { JavaBanner } from "./components/JavaBanner";
 import { Servers } from "./pages/Servers";
 import { Home } from "./pages/Home";
 import { Browse } from "./pages/Browse";
@@ -107,12 +108,18 @@ export default function App() {
   return (
     <>
       <Backdrop />
-      {/* Must come after Backdrop: both sit at z-index -1, so DOM order is what
-          puts the creatures in front of the water gradient. */}
+      {/* Order matters. Backdrop, SeaLife and Bubbles all sit at z-index -1, so
+          DOM order alone decides which is in front — water gradient, then
+          creatures, then bubbles, and every panel in front of the lot. The
+          cursor school is the exception: it tracks the pointer, so it stays on
+          top where you can see it. */}
       {settings?.seaLifeEnabled && <SeaLife />}
-      {settings?.fishEnabled && <FishSchool />}
       {settings?.seaLifeEnabled && <Bubbles />}
+      {settings?.fishEnabled && <FishSchool />}
       <TitleBar />
+      {/* App-wide: launching an instance and starting a server can both
+          trigger a Java download. */}
+      <JavaBanner />
       {content}
     </>
   );

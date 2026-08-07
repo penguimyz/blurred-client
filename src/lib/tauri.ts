@@ -23,7 +23,19 @@ import type {
 } from "../types/chat";
 import type { CrashReport } from "../types/crash";
 import type { Cape } from "../types/cape";
-import type { Server, ServerStatus } from "../types/server";
+import type {
+  PlayerList,
+  Server,
+  ServerBackup,
+  ServerPlayers,
+  ServerStatus,
+} from "../types/server";
+import type {
+  ImportCandidate,
+  ImportReport,
+  ImportSelection,
+  ImportSource,
+} from "../types/import";
 
 // One function per #[tauri::command]. Keeps invoke() string literals and
 // their argument shapes in exactly one place instead of scattered through
@@ -554,4 +566,133 @@ export function completeMsaLogin(
   expiresIn: number
 ): Promise<Account> {
   return invoke("complete_msa_login", { deviceCode, interval, expiresIn });
+}
+
+// ---- Importing from other launchers ----
+
+/** Every other launcher we can find on this machine, with its instances. */
+export function detectImportSources(): Promise<ImportSource[]> {
+  return invoke("detect_import_sources");
+}
+
+/** Scan a folder the user picked by hand, trying every known layout. */
+export function scanImportFolder(path: string): Promise<ImportSource> {
+  return invoke("scan_import_folder", { path });
+}
+
+/** Copy another launcher's instance in as a new Blurred instance. */
+export function importInstance(
+  candidate: ImportCandidate,
+  name: string,
+  mcVersion: string,
+  selection: ImportSelection
+): Promise<ImportReport> {
+  return invoke("import_instance", {
+    gameDir: candidate.id,
+    name,
+    mcVersion,
+    loader: candidate.loader,
+    loaderVersion: candidate.loaderVersion,
+    selection,
+  });
+}
+
+/** Copy selected content into an instance that already exists here. */
+export function importIntoInstance(
+  instanceId: string,
+  gameDir: string,
+  selection: ImportSelection
+): Promise<ImportReport> {
+  return invoke("import_into_instance", { instanceId, gameDir, selection });
+}
+
+// ---- Server administration (players + backups) ----
+
+export function listServerPlayers(id: string): Promise<ServerPlayers> {
+  return invoke("list_server_players", { id });
+}
+
+/** `level` applies to ops only; `reason` to bans only. */
+export function addServerPlayer(
+  id: string,
+  list: PlayerList,
+  username: string,
+  opts: { level?: number; reason?: string } = {}
+): Promise<ServerPlayers> {
+  return invoke("add_server_player", {
+    id,
+    list,
+    username,
+    level: opts.level ?? null,
+    reason: opts.reason ?? null,
+  });
+}
+
+export function removeServerPlayer(
+  id: string,
+  list: PlayerList,
+  username: string
+): Promise<ServerPlayers> {
+  return invoke("remove_server_player", { id, list, username });
+}
+
+/** Disconnect someone who's currently connected. Running servers only. */
+export function kickServerPlayer(
+  id: string,
+  username: string,
+  reason?: string
+): Promise<void> {
+  return invoke("kick_server_player", { id, username, reason: reason ?? null });
+}
+
+export function listServerBackups(id: string): Promise<ServerBackup[]> {
+  return invoke("list_server_backups", { id });
+}
+
+export function createServerBackup(id: string): Promise<ServerBackup> {
+  return invoke("create_server_backup", { id });
+}
+
+/** Replace the live world with a backup. Refused while the server is running. */
+export function restoreServerBackup(id: string, file: string): Promise<void> {
+  return invoke("restore_server_backup", { id, file });
+}
+
+export function deleteServerBackup(id: string, file: string): Promise<void> {
+  return invoke("delete_server_backup", { id, file });
+}
+
+// ---- Java runtimes ----
+
+/**
+ * What Blurred would launch with, without launching. `source` is one of
+ * "configured" | "managed" | "system" | "download" | "unsupported".
+ */
+export interface JavaPlan {
+  source: "configured" | "managed" | "system" | "download" | "unsupported";
+  path: string | null;
+  requiredMajor: number;
+  component: string;
+  detail: string;
+}
+
+export function planJava(mcVersion: string): Promise<JavaPlan> {
+  return invoke("plan_java", { mcVersion });
+}
+
+/** Download a Java runtime now instead of waiting for the first launch. */
+export function installJavaRuntime(major: number): Promise<string> {
+  return invoke("install_java_runtime", { major });
+}
+
+export interface JavaProgress {
+  component: string;
+  version?: string;
+  done: number;
+  total: number;
+}
+
+/** Progress while a Java runtime downloads. */
+export function onJavaProgress(fn: (p: JavaProgress) => void): Promise<UnlistenFn> {
+  return listen<JavaProgress>("java-progress", (e) => fn(e.payload));
 }

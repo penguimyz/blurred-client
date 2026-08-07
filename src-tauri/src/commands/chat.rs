@@ -48,6 +48,38 @@ const DEFAULT_PORT: u16 = 6697;
 /// The lobby every client joins by default. `#blurred-client` on Libera.
 const DEFAULT_CHANNEL: &str = "#blurred-client";
 
+/// Tell the in-game mod that someone joined or left the Blurred lobby.
+///
+/// Scoped to the lobby: presence in some other channel says nothing about
+/// which client a player is running, and badging on it would be a false claim.
+fn push_badge_change(app: &AppHandle, channel: &str, nick: &str, joined: bool) {
+    if !channel.eq_ignore_ascii_case(&lobby_channel(app)) {
+        return;
+    }
+    crate::commands::bridge::push(
+        app,
+        serde_json::json!({
+            "t": if joined { "userJoined" } else { "userLeft" },
+            "user": nick,
+        }),
+    );
+}
+
+/// The channel every Blurred Client sits in.
+///
+/// Read from settings each time rather than captured once, so it stays correct
+/// if the value is ever changed underneath a live connection.
+fn lobby_channel(app: &AppHandle) -> String {
+    use tauri::Manager;
+    let state = app.state::<AppState>();
+    let channel = state.settings.lock().unwrap().chat_channel.clone();
+    if channel.is_empty() {
+        DEFAULT_CHANNEL.to_string()
+    } else {
+        channel
+    }
+}
+
 /// CTCP verb carrying the friend-request handshake between two Blurred Clients.
 ///
 /// CTCP (a payload wrapped in \x01 inside a normal PRIVMSG) is the right
@@ -61,6 +93,21 @@ const CTCP_FRIEND: &str = "BLURREDFRIEND";
 /// CTCP verb carrying cape announcements and transfers. See
 /// `commands::capes` for the protocol.
 const CTCP_CAPE: &str = "BLURREDCAPE";
+
+/// CTCP verb carrying "here's where I'm playing" between crew.
+///
+/// Subcommands: `HERE <address>`, `AWAY`.
+///
+/// Sent to accepted crew individually rather than announced to the lobby, and
+/// only ever to people whose request you accepted — the address of the server
+/// you're on is not something to hand to a channel full of strangers. The
+/// receiving side enforces the same rule again on arrival, because a CTCP can
+/// be sent by anyone who knows your nick.
+///
+/// The mod decides whether anything is sent at all: it reports a server only
+/// while "Share which server you're on" is on, and the launcher can only relay
+/// what it was told.
+const CTCP_WORLD: &str = "BLURREDWORLD";
 
 // ---------------------------------------------------------------------------
 // State
@@ -76,6 +123,14 @@ pub struct ChatState {
     pub nick: String,
     pub channels: Vec<String>,
     pub generation: u64,
+    /// Crew currently online, lowercased, from the server's MONITOR replies.
+    ///
+    /// Presence is *not* written back to `friends.json` — it would be a lie the
+    /// moment the launcher closed — so the saved `online` flag is only ever a
+    /// cold-start guess. Anything that has to act on who is actually here reads
+    /// this instead: whether to offer a join, and who to tell when we change
+    /// servers.
+    pub online: HashSet<String>,
 }
 
 impl ChatState {
@@ -179,10 +234,71 @@ fn emit_message(app: &AppHandle, ev: ChatMessageEvent) {
 
 /// Same idea for the roster: push it to the game whenever it changes.
 fn push_friends_to_bridge(app: &AppHandle, friends: &[Friend]) {
-    crate::commands::bridge::push(
-        app,
-        serde_json::json!({ "t": "friends", "friends": friends }),
-    );
+    crate::commands::bridge::push(app, friends_payload(app, friends));
+}
+
+/// The roster in the shape the mod reads: every saved field, plus where each
+/// crew member is currently playing.
+///
+/// That last part is deliberately not on `Friend` and not in `friends.json`. It
+/// is true only while they're on that server, it arrives over the wire from
+/// them rather than from us, and persisting it would mean offering a one-click
+/// join to an address someone left days ago. It lives in memory next to the
+/// bridge, and this is where the two are stitched together.
+///
+/// `pub` because the bridge sends the same payload when a game client first
+/// connects; one shape, built in one place.
+pub fn friends_payload(app: &AppHandle, friends: &[Friend]) -> serde_json::Value {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    // Copied out one at a time rather than held: two locks open at once is how
+    // a deadlock gets written, and neither of these is big enough to be worth
+    // the risk of holding.
+    let servers = state.bridge.crew_servers.lock().unwrap().clone();
+    let live = state.chat.lock().unwrap().online.clone();
+
+    let list: Vec<serde_json::Value> = friends
+        .iter()
+        .map(|f| {
+            let mut value = serde_json::to_value(f).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(object) = value.as_object_mut() {
+                let key = f.nick.to_lowercase();
+                // Only for accepted crew: a pending entry has no business
+                // carrying a server, and the sender-side check means one should
+                // never exist anyway.
+                let server = if f.is_accepted() {
+                    servers.get(&key).cloned().unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                object.insert("server".to_string(), serde_json::Value::String(server));
+                // Live presence beats the saved flag, which is stale by
+                // definition — and the game only offers a join to someone it
+                // believes is online.
+                if f.is_accepted() {
+                    object.insert(
+                        "online".to_string(),
+                        serde_json::Value::Bool(live.contains(&key)),
+                    );
+                }
+            }
+            value
+        })
+        .collect();
+
+    serde_json::json!({ "t": "friends", "friends": list })
+}
+
+/// A system line belonging to no conversation — the transcript always shows
+/// these, in the launcher and in game.
+///
+/// This is how a command sent up from the mod reports that it couldn't be done.
+/// The bridge has no reply channel by design, and inventing one for the odd
+/// "you're not connected" would be a protocol's worth of machinery for a
+/// sentence the user needs to read in the same place they'd read any other.
+pub fn notice(app: &AppHandle, text: impl Into<String>) {
+    emit_system(app, "*", text);
 }
 
 fn emit_system(app: &AppHandle, conversation: &str, text: impl Into<String>) {
@@ -362,6 +478,130 @@ fn handle_cape_ctcp(
             app,
             serde_json::json!({ "t": "cape", "username": username, "data": data }),
         );
+    }
+}
+
+/// Record where a crew member says they're playing.
+///
+/// Ignored outright unless they're accepted crew — anyone on the network can
+/// send this, and an unsolicited address from a stranger appearing as a
+/// one-click join in someone's game is exactly the shape of a lure.
+fn handle_world_ctcp(app: &AppHandle, from: &str, payload: &str) {
+    use tauri::Manager;
+
+    let from = sanitize_nick(from);
+    if from.is_empty() {
+        return;
+    }
+
+    let state = app.state::<AppState>();
+    let friends = load_friends(&state.data_dir);
+    if !friends
+        .iter()
+        .any(|f| f.nick.eq_ignore_ascii_case(&from) && f.is_accepted())
+    {
+        return;
+    }
+
+    let (verb, arg) = match payload.split_once(' ') {
+        Some((v, a)) => (v.to_uppercase(), sanitize(a)),
+        None => (payload.trim().to_uppercase(), String::new()),
+    };
+
+    {
+        let mut servers = state.bridge.crew_servers.lock().unwrap();
+        match verb.as_str() {
+            // Capped at a length no real server address reaches, so a hostile
+            // peer can't grow this map with one enormous string.
+            "HERE" if !arg.is_empty() && arg.len() <= 128 => {
+                servers.insert(from.to_lowercase(), arg);
+            }
+            "AWAY" => {
+                servers.remove(&from.to_lowercase());
+            }
+            _ => return,
+        }
+    }
+
+    push_friends_to_bridge(app, &friends);
+}
+
+/// Tell crew where we're playing.
+///
+/// `only` addresses one person, which is what a friend coming online needs —
+/// they missed the announcement we made when we joined, and asking everyone to
+/// re-announce on every presence change would be a lot of traffic for a fact
+/// that changes twice an hour. Otherwise it goes to everyone accepted and
+/// online.
+pub fn announce_world(app: &AppHandle, only: Option<&str>) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let server = state.bridge.playing.lock().unwrap().clone();
+    let payload = match server.as_deref() {
+        Some(s) if !s.is_empty() => format!("HERE {s}"),
+        _ => "AWAY".to_string(),
+    };
+
+    // Nothing to tell one person if we aren't anywhere: they have no entry for
+    // us that would need clearing.
+    if only.is_some() && payload == "AWAY" {
+        return;
+    }
+
+    let friends = load_friends(&state.data_dir);
+    let chat = state.chat.lock().unwrap();
+    if !chat.connected {
+        return;
+    }
+
+    for f in friends.iter().filter(|f| f.is_accepted()) {
+        let send = match only {
+            // Named target: send regardless of presence, which is what we're
+            // being called to correct.
+            Some(nick) => f.nick.eq_ignore_ascii_case(nick),
+            // Live presence, not the saved flag: messaging someone who isn't
+            // here earns an ERR_NOSUCHNICK, which lands in the transcript as a
+            // system line the user didn't ask for.
+            None => chat.online.contains(&f.nick.to_lowercase()),
+        };
+        if send {
+            chat.send_raw(ctcp_line(&f.nick, CTCP_WORLD, &payload));
+        }
+    }
+}
+
+/// Drop every crew member's server, and tell the game.
+///
+/// Called when the connection goes down: those addresses were only ever as
+/// current as the connection that carried them, and an offer to join somewhere
+/// nobody is any more is worse than no offer at all.
+fn forget_all_worlds(app: &AppHandle) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    state.bridge.crew_servers.lock().unwrap().clear();
+    let friends = load_friends(&state.data_dir);
+    push_friends_to_bridge(app, &friends);
+}
+
+/// Drop a crew member's server when they go offline, so the game stops offering
+/// a join to a place they've left.
+fn forget_world(app: &AppHandle, nick: &str) {
+    use tauri::Manager;
+
+    let state = app.state::<AppState>();
+    let removed = state
+        .bridge
+        .crew_servers
+        .lock()
+        .unwrap()
+        .remove(&nick.to_lowercase())
+        .is_some();
+
+    if removed {
+        let friends = load_friends(&state.data_dir);
+        push_friends_to_bridge(app, &friends);
     }
 }
 
@@ -746,6 +986,9 @@ async fn run_reader<R>(
                     let mut chat = st.chat.lock().unwrap();
                     chat.connected = true;
                     chat.nick = nick.clone();
+                    // Presence from the previous session says nothing about
+                    // this one; the MONITOR replies below refill it.
+                    chat.online.clear();
                 }
                 let _ = app.emit(
                     "chat-status",
@@ -808,6 +1051,15 @@ async fn run_reader<R>(
                         if n.is_empty() || !monitored.contains(&n.to_lowercase()) {
                             continue;
                         }
+                        {
+                            let st = app.state::<AppState>();
+                            let mut chat = st.chat.lock().unwrap();
+                            if online {
+                                chat.online.insert(n.to_lowercase());
+                            } else {
+                                chat.online.remove(&n.to_lowercase());
+                            }
+                        }
                         crate::commands::bridge::push(
                             &app,
                             serde_json::json!({ "t": "presence", "nick": n, "online": online }),
@@ -816,6 +1068,15 @@ async fn run_reader<R>(
                             "chat-presence",
                             ChatPresenceEvent { nick: n.to_string(), online },
                         );
+
+                        // Presence is also the cue to exchange worlds: they
+                        // just arrived and know nothing about where we are, and
+                        // wherever they were, they aren't there now.
+                        if online {
+                            announce_world(&app, Some(n));
+                        } else {
+                            forget_world(&app, n);
+                        }
                     }
                 }
             }
@@ -846,10 +1107,21 @@ async fn run_reader<R>(
             "366" => {
                 if !pending_names.is_empty() {
                     let chan = pending_names.remove(0);
-                    let _ = app.emit(
-                        "chat-names",
-                        ChatNamesEvent { channel: chan, users: std::mem::take(&mut pending_names) },
-                    );
+                    let users = std::mem::take(&mut pending_names);
+
+                    // Anyone sitting in the Blurred lobby is, by definition,
+                    // running Blurred Client — so this roster is exactly the
+                    // set the in-game mod needs to badge other players with.
+                    // Pushed only for the lobby: an arbitrary channel someone
+                    // joined says nothing about who's on which client.
+                    if chan.eq_ignore_ascii_case(&lobby_channel(&app)) {
+                        crate::commands::bridge::push(
+                            &app,
+                            serde_json::json!({ "t": "users", "users": users }),
+                        );
+                    }
+
+                    let _ = app.emit("chat-names", ChatNamesEvent { channel: chan, users });
                 }
             }
 
@@ -869,6 +1141,12 @@ async fn run_reader<R>(
                 // the transcript would be a wall of base64.
                 if let Some(payload) = extract_ctcp(&body, CTCP_CAPE) {
                     handle_cape_ctcp(&app, &msg.prefix_nick, &payload, &tx);
+                    continue;
+                }
+
+                // Where a crew member is playing. Feeds the in-game join.
+                if let Some(payload) = extract_ctcp(&body, CTCP_WORLD) {
+                    handle_world_ctcp(&app, &msg.prefix_nick, &payload);
                     continue;
                 }
 
@@ -913,6 +1191,11 @@ async fn run_reader<R>(
                     }
                 } else {
                     emit_system(&app, &chan, format!("{} surfaced.", msg.prefix_nick));
+                    // Keep the in-game badge roster current. Without this it
+                    // would only refresh on the next NAMES, so anyone who
+                    // opened their launcher after you started playing would go
+                    // unbadged for the rest of the session.
+                    push_badge_change(&app, &chan, &msg.prefix_nick, true);
                 }
             }
 
@@ -924,6 +1207,7 @@ async fn run_reader<R>(
                     chat.channels.retain(|c| !c.eq_ignore_ascii_case(&chan));
                 } else {
                     emit_system(&app, &chan, format!("{} submerged.", msg.prefix_nick));
+                    push_badge_change(&app, &chan, &msg.prefix_nick, false);
                 }
             }
 
@@ -931,7 +1215,16 @@ async fn run_reader<R>(
             // conversation. Presence for friends is covered by MONITOR, and the
             // roster refreshes on the next NAMES — so this is intentionally
             // dropped rather than spammed into every open channel.
-            "QUIT" => {}
+            //
+            // The badge roster is the exception: dropping someone who wasn't on
+            // it is a no-op, so it can be applied unconditionally rather than
+            // waiting for a NAMES to notice they've gone.
+            "QUIT" => {
+                crate::commands::bridge::push(
+                    &app,
+                    serde_json::json!({ "t": "userLeft", "user": msg.prefix_nick }),
+                );
+            }
 
             "NICK" => {
                 let new = p.last().cloned().unwrap_or_default();
@@ -973,7 +1266,9 @@ async fn run_reader<R>(
         chat.connected = false;
         chat.tx = None;
         chat.channels.clear();
+        chat.online.clear();
     }
+    forget_all_worlds(&app);
     let _ = app.emit(
         "chat-status",
         ChatStatusEvent { connected: false, nick: String::new(), error: disconnect_reason },
@@ -991,7 +1286,9 @@ pub async fn chat_disconnect(app: AppHandle, state: State<'_, AppState>) -> Resu
         chat.tx = None;
         chat.connected = false;
         chat.channels.clear();
+        chat.online.clear();
     }
+    forget_all_worlds(&app);
     let _ = app.emit(
         "chat-status",
         ChatStatusEvent { connected: false, nick: String::new(), error: None },
@@ -1090,7 +1387,23 @@ pub async fn list_friends(state: State<'_, AppState>) -> Result<Vec<Friend>, Str
 /// a message — there's nothing to queue it in if we're offline.
 #[tauri::command]
 pub async fn add_friend(
+    app: AppHandle,
     state: State<'_, AppState>,
+    nick: String,
+    note: String,
+) -> Result<Vec<Friend>, String> {
+    add_friend_core(&app, &state, nick, note)
+}
+
+/// The body of [`add_friend`], synchronous and over a plain `&AppState`.
+///
+/// Split out for the mod bridge, whose connection task cannot hold a Tauri
+/// state guard across an await — the same reason `send_from_bridge` exists.
+/// Both callers go through this one implementation, so a request sent from
+/// inside the game is byte-for-byte the request the launcher sends.
+pub fn add_friend_core(
+    app: &AppHandle,
+    state: &AppState,
     nick: String,
     note: String,
 ) -> Result<Vec<Friend>, String> {
@@ -1127,7 +1440,7 @@ pub async fn add_friend(
         // user means when they add someone whose request is sitting in the list.
         Some(i) if friends[i].status == FriendStatus::PendingIn => {
             drop(friends);
-            return accept_friend(state, nick).await;
+            return accept_friend_core(app, state, nick);
         }
         // Re-sending an outstanding request is allowed: the other side may have
         // been offline, or not running Blurred Client, when we first asked.
@@ -1145,10 +1458,32 @@ pub async fn add_friend(
 
     save_friends(&state.data_dir, &friends)?;
 
-    let chat = state.chat.lock().unwrap();
-    chat.send_raw(ctcp_line(&nick, CTCP_FRIEND, &greeting_or_default(&greeting)));
+    {
+        let chat = state.chat.lock().unwrap();
+        chat.send_raw(ctcp_line(&nick, CTCP_FRIEND, &greeting_or_default(&greeting)));
+    }
+    announce_friends(app, &friends, "request", &nick);
 
     Ok(friends)
+}
+
+/// Publish a roster change to everything that shows one: the launcher UI and
+/// the in-game crew screen.
+///
+/// The commands used to only *return* the new list, which was enough when the
+/// launcher was the only thing displaying it. Now that crew can be added and
+/// answered from inside the game, a change made on either side has to reach the
+/// other, and a return value reaches neither.
+fn announce_friends(app: &AppHandle, friends: &[Friend], kind: &str, nick: &str) {
+    push_friends_to_bridge(app, friends);
+    let _ = app.emit(
+        "friends-changed",
+        FriendsChangedEvent {
+            friends: friends.to_vec(),
+            kind: kind.to_string(),
+            nick: nick.to_string(),
+        },
+    );
 }
 
 /// The greeting is sent as the CTCP argument, and a bare `REQ` with no argument
@@ -1164,7 +1499,17 @@ fn greeting_or_default(greeting: &str) -> String {
 /// Accept an incoming request, and tell the other side so their copy flips too.
 #[tauri::command]
 pub async fn accept_friend(
+    app: AppHandle,
     state: State<'_, AppState>,
+    nick: String,
+) -> Result<Vec<Friend>, String> {
+    accept_friend_core(&app, &state, nick)
+}
+
+/// The body of [`accept_friend`]. See [`add_friend_core`] for why it's split.
+pub fn accept_friend_core(
+    app: &AppHandle,
+    state: &AppState,
     nick: String,
 ) -> Result<Vec<Friend>, String> {
     let nick = sanitize_nick(&nick);
@@ -1180,11 +1525,18 @@ pub async fn accept_friend(
     friends[i].status = FriendStatus::Accepted;
     save_friends(&state.data_dir, &friends)?;
 
-    let chat = state.chat.lock().unwrap();
-    if chat.connected {
-        chat.send_raw(ctcp_line(&nick, CTCP_FRIEND, "ACCEPT"));
-        chat.send_raw(format!("MONITOR + {nick}"));
+    {
+        let chat = state.chat.lock().unwrap();
+        if chat.connected {
+            chat.send_raw(ctcp_line(&nick, CTCP_FRIEND, "ACCEPT"));
+            chat.send_raw(format!("MONITOR + {nick}"));
+        }
     }
+    announce_friends(app, &friends, "accepted", &nick);
+    // They're crew now, so where we're playing is theirs to know. Sent straight
+    // away rather than waiting for the MONITOR reply, which may not come until
+    // the next presence change.
+    announce_world(app, Some(&nick));
 
     Ok(friends)
 }
@@ -1193,7 +1545,19 @@ pub async fn accept_friend(
 /// rather than hanging forever.
 #[tauri::command]
 pub async fn decline_friend(
+    app: AppHandle,
     state: State<'_, AppState>,
+    nick: String,
+) -> Result<Vec<Friend>, String> {
+    decline_friend_core(&app, &state, nick)
+}
+
+/// The body of [`decline_friend`]. Also serves "withdraw a request I sent",
+/// which from either side is the same operation: forget the entry and tell them
+/// so theirs goes too.
+pub fn decline_friend_core(
+    app: &AppHandle,
+    state: &AppState,
     nick: String,
 ) -> Result<Vec<Friend>, String> {
     let safe = sanitize_nick(&nick);
@@ -1201,25 +1565,36 @@ pub async fn decline_friend(
     friends.retain(|f| !f.nick.eq_ignore_ascii_case(&nick));
     save_friends(&state.data_dir, &friends)?;
 
-    let chat = state.chat.lock().unwrap();
-    if chat.connected {
-        chat.send_raw(ctcp_line(&safe, CTCP_FRIEND, "DECLINE"));
+    {
+        let chat = state.chat.lock().unwrap();
+        if chat.connected {
+            chat.send_raw(ctcp_line(&safe, CTCP_FRIEND, "DECLINE"));
+        }
     }
+    announce_friends(app, &friends, "declined", &safe);
 
     Ok(friends)
 }
 
 #[tauri::command]
-pub async fn remove_friend(state: State<'_, AppState>, nick: String) -> Result<Vec<Friend>, String> {
+pub async fn remove_friend(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    nick: String,
+) -> Result<Vec<Friend>, String> {
     let mut friends = load_friends(&state.data_dir);
     friends.retain(|f| !f.nick.eq_ignore_ascii_case(&nick));
     save_friends(&state.data_dir, &friends)?;
 
     let safe = sanitize_nick(&nick);
-    let chat = state.chat.lock().unwrap();
-    if chat.connected {
-        chat.send_raw(format!("MONITOR - {safe}"));
+    {
+        let chat = state.chat.lock().unwrap();
+        if chat.connected {
+            chat.send_raw(format!("MONITOR - {safe}"));
+        }
     }
+    forget_world(&app, &safe);
+    announce_friends(&app, &friends, "removed", &safe);
 
     Ok(friends)
 }
@@ -1272,7 +1647,7 @@ mod tests {
     #[test]
     fn prefixes_nicks_that_start_with_a_digit() {
         assert_eq!(sanitize_nick("123abc"), "_123abc");
-        assert_eq!(sanitize_nick("penguimyz"), "penguimyz");
+        assert_eq!(sanitize_nick("deepdiver"), "deepdiver");
     }
 
     #[test]

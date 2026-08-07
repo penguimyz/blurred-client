@@ -52,20 +52,49 @@ export function JavaForm({
   const set = <K extends keyof JavaSettings>(k: K, v: JavaSettings[K]) =>
     onChange({ ...value, [k]: v });
 
+  const automatic = !value.executablePath;
+
   return (
     <fieldset disabled={disabled} style={{ border: "none", padding: 0, margin: 0, ...rowGap }}>
       <Field
-        label="Java executable"
+        label="Java"
         hint={
-          detected.length > 0
-            ? `${detected.length} JVM${detected.length > 1 ? "s" : ""} auto-detected — pick one or type a path.`
-            : "No JVMs auto-detected. Enter the full path to javaw.exe / java."
+          automatic
+            ? detected.length > 0
+              ? `Automatic. ${detected.length} JVM${detected.length > 1 ? "s" : ""} found on this machine; if none of them match what a version needs, Blurred downloads the right one.`
+              : "Automatic. No JVM installed on this machine — Blurred will download the one each Minecraft version needs, once, on first launch."
+            : "Using the path you set. Blurred won't second-guess it, so if it's the wrong Java version the game will fail to start."
         }
       >
+        {/* Leaving this blank is the supported, recommended state — hence the
+            explicit button rather than expecting people to clear a text box.
+            Java provisioning is handled in commands/java_runtime.rs. */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
+          <span
+            style={{
+              fontSize: 11,
+              padding: "3px 8px",
+              border: `1px solid ${automatic ? "var(--accent)" : "var(--glass-border)"}`,
+              color: automatic ? "var(--accent)" : "var(--text-tertiary)",
+            }}
+          >
+            {automatic ? "Managed by Blurred" : "Manual"}
+          </span>
+          {!automatic && (
+            <button
+              type="button"
+              onClick={() => set("executablePath", null)}
+              style={{ fontSize: 11, padding: "3px 8px" }}
+            >
+              Go back to automatic
+            </button>
+          )}
+        </div>
+
         <MonoField
           value={value.executablePath ?? ""}
           onChange={(v) => set("executablePath", v.trim() === "" ? null : v)}
-          placeholder="(auto-detect / not set)"
+          placeholder="(automatic — leave blank unless you need a specific JVM)"
         />
         {detected.length > 0 && (
           <select
@@ -73,7 +102,7 @@ export function JavaForm({
             onChange={(e) => e.target.value && set("executablePath", e.target.value)}
             style={{ ...selectStyle, marginTop: 6 }}
           >
-            <option value="">Use a detected JVM…</option>
+            <option value="">Pin a specific JVM…</option>
             {detected.map((j) => (
               <option key={j.path} value={j.path}>
                 {j.majorVersion ? `Java ${j.majorVersion}` : j.version} — {j.path}

@@ -6,6 +6,7 @@ import { GlassCard } from "../components/GlassCard";
 import { Icon } from "../components/Icon";
 import { Avatar } from "../components/Avatar";
 import { CrashBanner } from "../components/CrashBanner";
+import { ImportLauncherModal } from "../components/ImportLauncherModal";
 import { blurredEssentials, installMods } from "../lib/tauri";
 import { formatDuration, formatRelativeDate } from "../lib/format";
 import { navLabel } from "../lib/nav";
@@ -40,6 +41,7 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
   const { connected, refreshFriends, wire, crew, incoming } = useChatStore();
 
   const [showCreate, setShowCreate] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   // Which instance the hero's Play button will launch. Null means "follow the
@@ -107,6 +109,14 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
               {formatDuration(totalPlaytime)} logged
             </div>
           </div>
+          <button
+            onClick={() => setShowImport(true)}
+            title="Bring an instance across from Prism, MultiMC, the official launcher or another folder"
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <Icon name="folder" size={15} />
+            Import
+          </button>
           <button onClick={() => setShowCreate(true)} style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <Icon name="plus" size={15} />
             New Instance
@@ -401,6 +411,10 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
 
       {showCreate && (
         <CreateInstanceModal onClose={() => setShowCreate(false)} onDone={() => setShowCreate(false)} />
+      )}
+
+      {showImport && (
+        <ImportLauncherModal onClose={() => setShowImport(false)} onImported={refresh} />
       )}
     </div>
   );

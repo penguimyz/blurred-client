@@ -343,9 +343,45 @@ pub async fn launch_instance(
         settings.default_java.clone()
     };
 
-    let java_exe = java.executable_path.clone().ok_or_else(|| {
-        "no Java executable configured -- run java detection and set one in Settings".to_string()
-    })?;
+    // Resolve a JVM, downloading Mojang's own if this machine hasn't got one.
+    // Requiring people to go and install Java 21 before they can play is a
+    // barrier with no purpose — the version JSON says exactly which runtime it
+    // wants, so we can just fetch it. See commands::java_runtime.
+    let (required_major, component) = match &detail.java_version {
+        Some(req) => (req.major_version, req.component.clone()),
+        // Pre-1.17 versions predate the field entirely.
+        None => (
+            crate::commands::java_runtime::major_for_mc_version(&instance.mc_version),
+            None,
+        ),
+    };
+
+    let java_exe = {
+        // `log` borrows locals and isn't cloneable, so the progress sink gets
+        // its own owned handle rather than trying to share that one.
+        let app_log = app.clone();
+        let id_log = instance_id.clone();
+        crate::commands::java_runtime::ensure_java(
+            &app,
+            &state.data_dir,
+            java.executable_path.as_deref(),
+            required_major,
+            component.as_deref(),
+            &move |line| {
+                let _ = app_log.emit(
+                    "instance-log",
+                    serde_json::json!({
+                        "instanceId": id_log.clone(),
+                        "stream": "stdout",
+                        "line": line,
+                    }),
+                );
+            },
+        )
+        .await?
+        .to_string_lossy()
+        .to_string()
+    };
 
     let mut jvm_args = vec![
         format!("-Xms{}M", java.min_memory_mb),

@@ -1,6 +1,6 @@
 package dev.blurredclient.mod.mixin;
 
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
@@ -24,7 +24,8 @@ public class ScreenBackgroundMixin {
 
     @Inject(method = "renderBackground", at = @At("HEAD"), cancellable = true)
     private void blurred$oceanBackground(DrawContext ctx, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (!BlurredConfig.get().styleMenus) {
+        // Essential reskins the main menu too; see Essential#shouldStyleMenus.
+        if (!Essential.shouldStyleMenus()) {
             return;
         }
         MinecraftClient client = MinecraftClient.getInstance();

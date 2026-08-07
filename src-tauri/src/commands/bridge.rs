@@ -29,13 +29,22 @@
 //!   `{"t":"hello","token":"…"}`            authenticate (must be first)
 //!   `{"t":"send","conversation":"…","text":"…"}`
 //!   `{"t":"playing","server":"…"}`         report the server you joined
+//!   `{"t":"wearCape","id":"…"}`            cape picked in game (id absent = off)
+//!   `{"t":"addFriend","nick":"…","note":"…"}`
+//!   `{"t":"acceptFriend","nick":"…"}`
+//!   `{"t":"declineFriend","nick":"…"}`     also withdraws one we sent
 //!
 //! Launcher → mod:
 //!   `{"t":"welcome","nick":"…","connected":bool}`
-//!   `{"t":"friends","friends":[…]}`
+//!   `{"t":"friends","friends":[{…,"server":"…"}]}`
 //!   `{"t":"message","conversation":"…","from":"…","text":"…","mine":bool}`
 //!   `{"t":"status","connected":bool,"nick":"…"}`
+//!
+//! Commands are fire-and-forget: there is no request id and no reply. Anything
+//! the user needs to know comes back through the channels the mod already
+//! renders — a roster push, or a system line in the transcript.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Mutex;
 
@@ -63,8 +72,13 @@ pub struct BridgeState {
     /// Fan-out to every connected mod client.
     pub tx: broadcast::Sender<String>,
     /// The Minecraft server the game most recently reported being on. Feeds
-    /// "join friend" — see `chat::set_playing`.
+    /// "join friend" — see `chat::announce_world`.
     pub playing: Mutex<Option<String>>,
+    /// Where each crew member says *they* are playing, keyed by lowercased
+    /// nick. Populated from the `BLURREDWORLD` CTCP and never persisted: it's
+    /// true only while they're there, and a saved copy would offer a one-click
+    /// join to somewhere they left days ago.
+    pub crew_servers: Mutex<HashMap<String, String>>,
 }
 
 impl Default for BridgeState {
@@ -75,6 +89,7 @@ impl Default for BridgeState {
             token: uuid::Uuid::new_v4().to_string(),
             tx,
             playing: Mutex::new(None),
+            crew_servers: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -151,7 +166,7 @@ async fn serve(app: AppHandle, stream: tokio::net::TcpStream) -> std::io::Result
         "t": "welcome", "nick": nick, "connected": connected,
     });
     writer.write_all(format!("{welcome}\n").as_bytes()).await?;
-    let roster = serde_json::json!({ "t": "friends", "friends": friends });
+    let roster = crate::commands::chat::friends_payload(&app, &friends);
     writer.write_all(format!("{roster}\n").as_bytes()).await?;
 
     // Every cape we know about, in one message. Includes our own so the player
@@ -262,7 +277,9 @@ async fn handle_command(app: &AppHandle, line: &str) {
             push_cape_list(app);
         }
 
-        // The game joined (or left) a server. Recorded so crew can join you.
+        // The game joined (or left) a server. Recorded so crew can join you,
+        // then handed straight on to them — the record is only useful if the
+        // people it's for are told about it.
         Some("playing") => {
             let server = v
                 .get("server")
@@ -273,11 +290,70 @@ async fn handle_command(app: &AppHandle, line: &str) {
                 let state = app.state::<AppState>();
                 *state.bridge.playing.lock().unwrap() = server.clone();
             }
+            crate::commands::chat::announce_world(app, None);
             let _ = app.emit("playing-changed", server);
+        }
+
+        // Crew management from the in-game screen. Each one routes through the
+        // same core the launcher's own buttons call, so there is one
+        // implementation of the handshake rather than two that can drift.
+        //
+        // The result is reported back as a system line in the transcript rather
+        // than returned: the bridge is a one-way command channel, and the mod
+        // is already showing that transcript next to the button that was
+        // pressed. Success needs no line — the roster push says it.
+        Some("addFriend") => {
+            let nick = nick_of(&v);
+            if nick.is_empty() {
+                return;
+            }
+            let note = v.get("note").and_then(|c| c.as_str()).unwrap_or("");
+            let state = app.state::<AppState>();
+            match crate::commands::chat::add_friend_core(app, &state, nick.clone(), note.to_string())
+            {
+                Ok(_) => crate::commands::chat::notice(
+                    app,
+                    format!("Crew request sent to {nick}."),
+                ),
+                Err(e) => crate::commands::chat::notice(app, e),
+            }
+        }
+
+        Some("acceptFriend") => {
+            let nick = nick_of(&v);
+            if nick.is_empty() {
+                return;
+            }
+            let state = app.state::<AppState>();
+            if let Err(e) = crate::commands::chat::accept_friend_core(app, &state, nick) {
+                crate::commands::chat::notice(app, e);
+            }
+        }
+
+        // Declining an incoming request and withdrawing one of ours are the
+        // same operation on this side; the mod offers one button for both.
+        Some("declineFriend") => {
+            let nick = nick_of(&v);
+            if nick.is_empty() {
+                return;
+            }
+            let state = app.state::<AppState>();
+            if let Err(e) = crate::commands::chat::decline_friend_core(app, &state, nick) {
+                crate::commands::chat::notice(app, e);
+            }
         }
 
         _ => {}
     }
+}
+
+/// The `nick` field of a mod command, trimmed. Empty means "don't act".
+fn nick_of(v: &serde_json::Value) -> String {
+    v.get("nick")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 /// Push a JSON event to every connected mod client. Cheap no-op when nothing

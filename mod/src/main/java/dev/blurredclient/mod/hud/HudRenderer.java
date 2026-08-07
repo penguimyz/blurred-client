@@ -2,35 +2,77 @@ package dev.blurredclient.mod.hud;
 
 import dev.blurredclient.mod.Theme;
 import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.ui.BlurredFont;
+import dev.blurredclient.mod.ui.Draw;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.client.network.ServerInfo;
+import net.minecraft.client.network.PlayerListEntry;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The in-game overlay: a Blurred watermark plus a stack of stat readouts.
+ * The in-game overlay: a compact readout of FPS, ping and whatever else you've
+ * asked for.
+ *
+ * <h2>The island</h2>
+ *
+ * Readouts used to be a vertical stack of separate panels down the top-left
+ * corner — one box per number, which at three or four readouts took a
+ * meaningful bite out of the screen and looked like a debug dump. They're now a
+ * single pill with the values divided inside it, sat against the top edge in
+ * whichever corner you want. One object instead of five, and it reads as part
+ * of the window chrome rather than as something covering the game.
  *
  * <p>Everything is drawn with primitives rather than textures, so there is no
- * atlas to bind and the whole HUD scales cleanly with the GUI scale. Each row
- * is a small rounded panel in the launcher's palette, which is what ties the
- * game overlay to the launcher visually.
+ * atlas to bind and the whole HUD scales cleanly with the GUI scale.
  *
- * <p>Rows are collected into a list first and drawn in one pass, so adding an
- * element never has to know where the previous one ended.
+ * <h2>Size</h2>
+ *
+ * The readouts are drawn below full font size and the padding is tight around
+ * them. A HUD is glanced at, not read, and at 8px with 7px of padding the pill
+ * was competing with the hotbar for attention — which is the wrong way round.
+ * {@link Draw#text} handles the scaling, so the numbers stay on the pixel grid.
  */
 public final class HudRenderer {
-    private static final int PAD = 6;
-    private static final int ROW_GAP = 3;
-    private static final int MARGIN = 6;
+    /**
+     * Horizontal padding, kept at roughly the corner radius: with a capsule end
+     * the fill curves away from the text, so padding measured from the widest
+     * row is not the clearance the first character actually gets.
+     */
+    private static final int PAD_X = 6;
+    private static final int PAD_Y = 3;
+    private static final int GAP = 5;
+    private static final int MARGIN = 4;
+    private static final int ROW_GAP = 2;
+
+    /**
+     * Readout text size, as a fraction of the game font. Small enough to read
+     * as chrome, large enough that a three-digit FPS count is still legible at
+     * GUI scale 2.
+     */
+    private static final float SCALE = 0.8f;
 
     /** Rolling FPS smoothing so the number doesn't strobe every frame. */
     private static float smoothedFps = 60f;
+    /** Same for ping, which arrives in discrete jumps from the server. */
+    private static float smoothedPing = -1f;
+
+    /**
+     * Wall-clock time, 12-hour with an am/pm marker — the way a clock in the
+     * corner of a screen is read everywhere outside a timetable. 24-hour was
+     * simply the terser thing to format, not the thing anyone wanted.
+     */
+    private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("h:mm a");
 
     private HudRenderer() {}
+
+    /** One readout: its text and the colour to draw it in. */
+    private record Item(String text, int color) {}
 
     public static void render(DrawContext ctx, MinecraftClient client) {
         BlurredConfig cfg = BlurredConfig.get();
@@ -42,48 +84,109 @@ public final class HudRenderer {
             return;
         }
 
-        // No client watermark. The HUD used to lead with a porthole mark and
-        // "BLURRED"; it was branding taking up screen space in-game and was
-        // removed on request. The stat rows below are the whole HUD now.
-        int y = MARGIN;
+        List<Item> items = buildItems(client, cfg);
+        if (items.isEmpty()) {
+            return;
+        }
 
-        for (String row : buildRows(client, cfg)) {
-            y = drawRow(ctx, client, MARGIN, y, row) + ROW_GAP;
+        if (cfg.hudIsland) {
+            drawIsland(ctx, client, cfg, items);
+        } else {
+            drawStack(ctx, client, cfg, items);
         }
     }
 
-    private static List<String> buildRows(MinecraftClient client, BlurredConfig cfg) {
-        List<String> rows = new ArrayList<>(6);
+    private static List<Item> buildItems(MinecraftClient client, BlurredConfig cfg) {
+        List<Item> items = new ArrayList<>(6);
 
         if (cfg.showFps) {
             // Exponential smoothing: fast enough to track a real drop, slow
             // enough that the digits stay readable.
             smoothedFps = MathHelper.lerp(0.08f, smoothedFps, client.getCurrentFps());
-            rows.add(Math.round(smoothedFps) + " FPS");
-        }
-
-        if (cfg.showCoords && client.player != null) {
-            rows.add(String.format(
-                    "%.0f, %.0f, %.0f",
-                    client.player.getX(), client.player.getY(), client.player.getZ()));
-        }
-
-        if (cfg.showDirection && client.player != null) {
-            rows.add(facing(client.player.getYaw()));
+            int fps = Math.round(smoothedFps);
+            items.add(new Item(fps + " FPS", fpsColor(fps)));
         }
 
         if (cfg.showPing) {
-            ServerInfo server = client.getCurrentServerEntry();
-            if (server != null) {
-                rows.add(server.ping + " ms");
+            int latency = measurePing(client);
+            if (latency >= 0) {
+                smoothedPing = smoothedPing < 0 ? latency : MathHelper.lerp(0.25f, smoothedPing, latency);
+                int ms = Math.round(smoothedPing);
+                items.add(new Item(ms + " ms", pingColor(ms)));
+            } else {
+                // Reset, so reconnecting doesn't average against a stale value
+                // from the previous server.
+                smoothedPing = -1f;
             }
         }
 
-        if (cfg.showCps) {
-            rows.add(CpsTracker.leftCps() + " / " + CpsTracker.rightCps() + " CPS");
+        if (cfg.showCoords && client.player != null) {
+            items.add(new Item(
+                    String.format(
+                            "%.0f %.0f %.0f",
+                            client.player.getX(), client.player.getY(), client.player.getZ()),
+                    Theme.TEXT));
         }
 
-        return rows;
+        if (cfg.showDirection && client.player != null) {
+            items.add(new Item(facing(client.player.getYaw()), Theme.TEXT));
+        }
+
+        if (cfg.showCps) {
+            items.add(new Item(CpsTracker.leftCps() + "/" + CpsTracker.rightCps() + " CPS", Theme.TEXT));
+        }
+
+        if (cfg.showClock) {
+            items.add(new Item(LocalTime.now().format(CLOCK), Theme.TEXT_DIM));
+        }
+
+        return items;
+    }
+
+    /**
+     * Our own latency, as the server measures it.
+     *
+     * <p>This used to read {@code client.getCurrentServerEntry().ping}, which is
+     * wrong in a way that's easy to miss: {@code ServerInfo.ping} is filled in
+     * by the <em>multiplayer list</em> when it pings servers to draw their
+     * signal bars, and it is never updated again once you connect. So the HUD
+     * was showing the round-trip of a status ping from whenever you last looked
+     * at the server list — frozen for the whole session, and simply absent if
+     * you joined by direct connect.
+     *
+     * <p>The player list entry for our own UUID carries the latency the server
+     * measures from its keep-alive round trip, refreshed continuously while
+     * playing. That's the real number.
+     *
+     * @return latency in milliseconds, or -1 when there isn't one (singleplayer,
+     *         or before the first measurement lands)
+     */
+    private static int measurePing(MinecraftClient client) {
+        if (client.player == null || client.getNetworkHandler() == null) {
+            return -1;
+        }
+        PlayerListEntry self = client.getNetworkHandler().getPlayerListEntry(client.player.getUuid());
+        if (self == null) {
+            return -1;
+        }
+        int latency = self.getLatency();
+        // A single-player integrated server reports 0, which is true but not
+        // worth a readout.
+        return latency <= 0 ? -1 : latency;
+    }
+
+    private static int fpsColor(int fps) {
+        if (fps >= 100) return Theme.SUCCESS;
+        if (fps >= 55) return Theme.TEXT;
+        if (fps >= 30) return Theme.WARNING;
+        return Theme.DANGER;
+    }
+
+    private static int pingColor(int ms) {
+        if (ms < 60) return Theme.SUCCESS;
+        if (ms < 120) return Theme.TEXT;
+        if (ms < 250) return Theme.WARNING;
+        return Theme.DANGER;
     }
 
     /** Compass point from a yaw angle. */
@@ -104,35 +207,117 @@ public final class HudRenderer {
         };
     }
 
-    private static int drawRow(DrawContext ctx, MinecraftClient client, int x, int y, String text) {
-        int textWidth = client.textRenderer.getWidth(text);
-        int h = client.textRenderer.fontHeight + PAD;
-        int w = PAD + textWidth + PAD;
+    // ------------------------------------------------------------------
+    // Layout
+    // ------------------------------------------------------------------
 
-        panel(ctx, x, y, w, h);
-        ctx.drawTextWithShadow(
-                client.textRenderer,
-                Text.literal(text),
-                x + PAD,
-                y + (h - client.textRenderer.fontHeight) / 2,
-                Theme.TEXT);
+    /** Left edge for a block of the given width, honouring the chosen corner. */
+    private static int originX(MinecraftClient client, BlurredConfig cfg, int width) {
+        int screen = client.getWindow().getScaledWidth();
+        return switch (cfg.hudPosition) {
+            case TOP_LEFT -> MARGIN;
+            case TOP_CENTER -> (screen - width) / 2;
+            case TOP_RIGHT -> screen - width - MARGIN;
+        };
+    }
 
-        return y + h;
+    private static void drawIsland(
+            DrawContext ctx, MinecraftClient client, BlurredConfig cfg, List<Item> items) {
+        var font = client.textRenderer;
+
+        int content = 0;
+        for (int i = 0; i < items.size(); i++) {
+            content += Draw.width(font, BlurredFont.of(items.get(i).text()), SCALE);
+            if (i > 0) {
+                content += GAP * 2;
+            }
+        }
+
+        int lineH = Draw.height(font, SCALE);
+        int w = PAD_X * 2 + content;
+        int h = lineH + PAD_Y * 2;
+        int x = originX(client, cfg, w);
+        int y = MARGIN;
+
+        island(ctx, x, y, w, h);
+
+        int cursor = x + PAD_X;
+        int textY = y + (h - lineH) / 2;
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                // Divider sits in the middle of the gap, inset vertically so it
+                // reads as a separator rather than as a wall.
+                int dx = cursor + GAP;
+                ctx.fill(dx, y + 3, dx + 1, y + h - 3, 0x3A7DE2F0);
+                cursor += GAP * 2;
+            }
+            Item item = items.get(i);
+            Text text = BlurredFont.of(item.text());
+            Draw.text(ctx, font, text, cursor, textY, item.color(), SCALE);
+            cursor += Draw.width(font, text, SCALE);
+        }
     }
 
     /**
-     * A HUD panel: translucent abyssal fill, a lit top edge, and clipped
-     * corners. Minecraft's {@code fill} only does rectangles, so the "rounded"
-     * look comes from insetting the first and last row by a pixel — cheap, and
-     * at HUD scale it reads as a radius.
+     * The pill itself: a true capsule, with the corner radius taken all the way
+     * to half the height.
+     *
+     * <p>It used to fake the curve with a fixed ladder of one and two pixel
+     * insets, which at this size reads as a rectangle with its corners bitten
+     * off rather than as a rounded shape. {@link Draw#roundedRect} derives each
+     * row's inset from the actual circle, so the ends are properly round and
+     * stay round if the height changes.
+     */
+    private static void island(DrawContext ctx, int x, int y, int w, int h) {
+        int r = h / 2;
+
+        // Shadow, offset down. Grounds the pill against a bright sky.
+        Draw.roundedRect(ctx, x, y + 2, w, h, r, 0x40000B12);
+        Draw.roundedRect(ctx, x, y, w, h, r, Theme.PANEL);
+        // Faint rim, so the shape has a defined edge over bright terrain.
+        Draw.roundedOutline(ctx, x, y, w, h, r, 0x2A7DE2F0);
+
+        // Lit top edge — the wet-glass cue the launcher's cards have. Inset to
+        // match the curve, so it stops where the corner starts.
+        int cap = Draw.inset(0, h, r) + 1;
+        ctx.fill(x + cap, y, x + w - cap, y + 1, Theme.PANEL_EDGE);
+
+        // Accent pip at each end, at the widest row so it sits inside the fill.
+        ctx.fill(x + 1, y + h / 2 - 1, x + 2, y + h / 2 + 1, Theme.ACCENT_GLOW);
+        ctx.fill(x + w - 2, y + h / 2 - 1, x + w - 1, y + h / 2 + 1, Theme.ACCENT_GLOW);
+    }
+
+    /** One panel per readout, stacked downward. The pre-island layout. */
+    private static void drawStack(
+            DrawContext ctx, MinecraftClient client, BlurredConfig cfg, List<Item> items) {
+        var font = client.textRenderer;
+        int y = MARGIN;
+        int lineH = Draw.height(font, SCALE);
+
+        for (Item item : items) {
+            Text text = BlurredFont.of(item.text());
+            int w = PAD_X * 2 + Draw.width(font, text, SCALE);
+            int h = lineH + PAD_Y * 2;
+            int x = originX(client, cfg, w);
+
+            panel(ctx, x, y, w, h);
+            Draw.text(ctx, font, text, x + PAD_X, y + (h - lineH) / 2, item.color(), SCALE);
+            y += h + ROW_GAP;
+        }
+    }
+
+    /**
+     * A HUD panel: translucent abyssal fill, a lit top edge, and rounded
+     * corners. A smaller radius than the island's — this is a box that happens
+     * to be soft at the corners, not a capsule.
      */
     public static void panel(DrawContext ctx, int x, int y, int w, int h) {
-        ctx.fill(x + 1, y, x + w - 1, y + 1, Theme.PANEL);
-        ctx.fill(x, y + 1, x + w, y + h - 1, Theme.PANEL);
-        ctx.fill(x + 1, y + h - 1, x + w - 1, y + h, Theme.PANEL);
+        int r = Math.min(4, h / 2);
+        Draw.roundedRect(ctx, x, y, w, h, r, Theme.PANEL);
 
         // Lit top edge — the same wet-glass cue the launcher's cards have.
-        ctx.fill(x + 2, y, x + w - 2, y + 1, Theme.PANEL_EDGE);
+        int cap = Draw.inset(0, h, r) + 1;
+        ctx.fill(x + cap, y, x + w - cap, y + 1, Theme.PANEL_EDGE);
     }
 
     /**

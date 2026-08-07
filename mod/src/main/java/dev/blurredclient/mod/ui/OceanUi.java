@@ -129,10 +129,17 @@ public final class OceanUi {
     /**
      * An ocean-styled button, replacing the vanilla texture.
      *
-     * <p>Carries the launcher's press behaviour: a hard offset shadow at rest
-     * that collapses when held, so the control physically sinks. Vanilla has no
-     * "pressed" state exposed to the renderer, so hover stands in for it —
-     * hovering lifts the button instead.
+     * <p><b>Square.</b> This used to chamfer the corners by insetting the first
+     * and last pixel row, which is the standard pixel-art trick for a rounded
+     * edge. At button sizes it did not read as rounded — it read as four
+     * missing corners, and worse, it read as *inconsistently* missing corners,
+     * because the chamfer landed differently depending on the widget's height.
+     * A hard rectangle is what the launcher's own cards do and it's what this
+     * does now.
+     *
+     * <p>Carries the launcher's press behaviour: a hard offset shadow at rest.
+     * Vanilla has no "pressed" state exposed to the renderer, so hover stands
+     * in for it — hovering lifts the button instead.
      */
     public static void button(
             DrawContext ctx, TextRenderer font, Text label,
@@ -148,12 +155,21 @@ public final class OceanUi {
         // Hard drop shadow, offset down-right. Never blurred.
         ctx.fill(x + 2, y + 2, x + w + 2, y + h + 2, 0x70000B12);
 
+        // Body: two full-width rectangles, corner to corner.
         int mid = y + h / 2;
-        // Body, corners bitten off so it reads as a chamfered sprite.
-        ctx.fill(x + 1, y, x + w - 1, mid, top);
-        ctx.fill(x + 1, mid, x + w - 1, y + h, bottom);
-        ctx.fill(x, y + 1, x + 1, y + h - 1, top);
-        ctx.fill(x + w - 1, y + 1, x + w, y + h - 1, bottom);
+        ctx.fill(x, y, x + w, mid, top);
+        ctx.fill(x, mid, x + w, y + h, bottom);
+
+        // A band of caustic dither across the upper half, so the face has
+        // texture rather than being two flat blocks of colour.
+        if (enabled) {
+            int sheen = hovered ? 0x1EDFFBFF : 0x12BDF3FF;
+            for (int dy = y + 2; dy < mid; dy += P) {
+                for (int dx = x + 2 + ((dy - y) / P % 2) * P; dx < x + w - 2; dx += P * 2) {
+                    ctx.fill(dx, dy, Math.min(dx + P, x + w - 2), Math.min(dy + 1, mid), sheen);
+                }
+            }
+        }
 
         // Bevel: light inside the top-left, dark inside the bottom-right. The
         // classic two-pixel trick that gives a flat sprite volume.
@@ -162,22 +178,15 @@ public final class OceanUi {
         ctx.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, 0x50041018);
         ctx.fill(x + w - 2, y + 2, x + w - 1, y + h - 1, 0x40041018);
 
-        // Border.
-        ctx.fill(x + 1, y, x + w - 1, y + 1, edge);
-        ctx.fill(x + 1, y + h - 1, x + w - 1, y + h, edge);
-        ctx.fill(x, y + 1, x + 1, y + h - 1, edge);
-        ctx.fill(x + w - 1, y + 1, x + w, y + h - 1, edge);
-
-        // Corner rivets — four lit pixels just inside the chamfer. Cheap, and
-        // they're what stop the shape reading as a plain box.
-        int rivet = enabled ? (hovered ? Theme.ACCENT : 0x88BDF3FF) : 0x40BDF3FF;
-        ctx.fill(x + 2, y + 2, x + 3, y + 3, rivet);
-        ctx.fill(x + w - 3, y + 2, x + w - 2, y + 3, rivet);
-        ctx.fill(x + 2, y + h - 3, x + 3, y + h - 2, rivet);
-        ctx.fill(x + w - 3, y + h - 3, x + w - 2, y + h - 2, rivet);
+        // Border, all four sides full length — no bitten corners.
+        ctx.fill(x, y, x + w, y + 1, edge);
+        ctx.fill(x, y + h - 1, x + w, y + h, edge);
+        ctx.fill(x, y, x + 1, y + h, edge);
+        ctx.fill(x + w - 1, y, x + w, y + h, edge);
 
         // Hover: accent bars sliding in from both ends, like a selected slot.
-        if (hovered && enabled) {
+        // Skipped on narrow buttons, where they'd meet in the middle.
+        if (hovered && enabled && w >= 40) {
             ctx.fill(x + 3, y + h / 2 - 3, x + 5, y + h / 2 + 3, Theme.ACCENT);
             ctx.fill(x + w - 5, y + h / 2 - 3, x + w - 3, y + h / 2 + 3, Theme.ACCENT);
         }
@@ -186,15 +195,60 @@ public final class OceanUi {
 
         // Trim the label to the space between the hover bars so a long string
         // can never spill outside its own button.
-        int room = w - 16;
-        Text shown = label;
-        if (font.getWidth(label) > room) {
-            shown = Text.literal(font.trimToWidth(label.getString(), Math.max(0, room - 6)) + "…");
+        int room = w - (w >= 40 ? 16 : 6);
+        Text shown = BlurredFont.apply(label);
+        if (font.getWidth(shown) > room) {
+            shown = BlurredFont.of(
+                    font.trimToWidth(label.getString(), Math.max(0, room - 6)) + "…");
         }
 
         int tx = x + (w - font.getWidth(shown)) / 2;
         int ty = y + (h - font.fontHeight) / 2 + 1;
         ctx.drawTextWithShadow(font, shown, tx, ty, textColor);
+    }
+
+    /**
+     * A framed panel for grouping things on a mod screen.
+     *
+     * <p>Heavier than the HUD's {@link dev.blurredclient.mod.hud.HudRenderer#panel}:
+     * that one is a translucent slab meant to sit over live gameplay, whereas
+     * this is furniture on a full screen and can afford an inner edge and a
+     * corner detail. Having both is the difference between a screen that reads
+     * as composed and one that reads as text floating on a background.
+     */
+    public static void panel(DrawContext ctx, int x, int y, int w, int h, boolean raised) {
+        ctx.fill(x + 2, y + 2, x + w + 2, y + h + 2, 0x50000B12);
+        ctx.fill(x, y, x + w, y + h, raised ? Theme.PANEL_RAISED : Theme.PANEL);
+
+        // Inner edge: lit along the top, shadowed along the bottom.
+        ctx.fill(x, y, x + w, y + 1, Theme.PANEL_EDGE);
+        ctx.fill(x, y + h - 1, x + w, y + h, 0x40041018);
+        ctx.fill(x, y, x + 1, y + h, 0x2A7DE2F0);
+        ctx.fill(x + w - 1, y, x + w, y + h, 0x30041018);
+
+        // Corner ticks — two pixels in from each corner. Cheap, and they're
+        // what stop a plain rectangle reading as an unfinished placeholder.
+        int tick = 0x667DE2F0;
+        ctx.fill(x + 2, y + 2, x + 5, y + 3, tick);
+        ctx.fill(x + 2, y + 2, x + 3, y + 5, tick);
+        ctx.fill(x + w - 5, y + h - 3, x + w - 2, y + h - 2, tick);
+        ctx.fill(x + w - 3, y + h - 5, x + w - 2, y + h - 2, tick);
+    }
+
+    /**
+     * A section heading: a label with a rule running out to the right.
+     *
+     * <p>Returns the y below the heading, so callers can stack sections without
+     * tracking magic offsets.
+     */
+    public static int heading(DrawContext ctx, TextRenderer font, String text, int x, int y, int w) {
+        ctx.drawTextWithShadow(font, BlurredFont.of(text), x, y, Theme.TEXT_FAINT);
+        int after = x + font.getWidth(BlurredFont.of(text)) + 6;
+        int lineY = y + font.fontHeight / 2;
+        if (after < x + w) {
+            ctx.fill(after, lineY, x + w, lineY + 1, 0x337DE2F0);
+        }
+        return y + font.fontHeight + 4;
     }
 
     /*

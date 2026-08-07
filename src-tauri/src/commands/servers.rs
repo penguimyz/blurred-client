@@ -35,18 +35,72 @@ pub struct RunningServer {
     pub stdin: UnboundedSender<String>,
     pub kill: tokio::sync::oneshot::Sender<()>,
     pub ready: bool,
+    /// When the process was spawned, for the uptime readout.
+    pub started: std::time::Instant,
+    /// Who is connected, maintained from the console log. Ordered by join, so
+    /// the list doesn't reshuffle itself while someone is reading it.
+    pub players: Vec<String>,
+    /// Set when the user asked it to stop, so the supervisor can tell a clean
+    /// shutdown apart from a crash and only auto-restart the latter.
+    pub stopping: bool,
 }
 
 #[derive(Default)]
 pub struct ServerState {
     pub running: Mutex<HashMap<String, RunningServer>>,
+    /// Ids queued for an auto-restart. Set once at startup by
+    /// [`start_restart_worker`]; see it for why this is a channel rather than
+    /// a direct call.
+    pub restart_tx: std::sync::OnceLock<UnboundedSender<String>>,
 }
 
-fn servers_dir(state: &AppState) -> PathBuf {
+/// Bring crashed servers back up.
+///
+/// This exists as a worker fed by a channel rather than as a call from the
+/// crash supervisor, and the reason is a compiler constraint rather than
+/// taste: a supervisor that called `start_server_impl` directly would make
+/// that function indirectly recursive, and Rust cannot infer `Send` for a
+/// recursive `async fn` — auto-trait inference hits a cycle and gives up,
+/// leaving a future that `tauri::async_runtime::spawn` refuses.
+///
+/// Routing through a queue breaks the cycle, and gives two things worth having
+/// anyway: restarts are serialised rather than racing, and the restart delay
+/// lives in one place.
+pub fn start_restart_worker(app: AppHandle) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
+    if app.state::<AppState>().servers.restart_tx.set(tx).is_err() {
+        // Already started. Calling twice would leave a second worker racing
+        // the first for the same servers.
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        while let Some(id) = rx.recv().await {
+            // Wait before coming back, or a server that crashes on startup
+            // spins as fast as the JVM can fail.
+            tokio::time::sleep(std::time::Duration::from_secs(RESTART_DELAY_SECS)).await;
+
+            let state: &AppState = app.state::<AppState>().inner();
+            if let Err(e) = start_server_impl(&app, state, id.clone()).await {
+                let _ = app.emit(
+                    "server-log",
+                    serde_json::json!({
+                        "serverId": id,
+                        "line": format!("Auto-restart failed: {e}"),
+                    }),
+                );
+            }
+        }
+    });
+}
+
+const RESTART_DELAY_SECS: u64 = 5;
+
+pub(crate) fn servers_dir(state: &AppState) -> PathBuf {
     state.data_dir.join("servers")
 }
 
-fn server_dir(state: &AppState, id: &str) -> PathBuf {
+pub(crate) fn server_dir(state: &AppState, id: &str) -> PathBuf {
     servers_dir(state).join(id)
 }
 
@@ -54,7 +108,7 @@ fn manifest_path(dir: &Path) -> PathBuf {
     dir.join("server.json")
 }
 
-fn load_server(dir: &Path) -> Option<Server> {
+pub(crate) fn load_server(dir: &Path) -> Option<Server> {
     std::fs::read_to_string(manifest_path(dir))
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
@@ -67,7 +121,7 @@ fn save_server(dir: &Path, server: &Server) -> Result<(), String> {
 }
 
 /// Reject ids that could escape the servers directory.
-fn check_id(id: &str) -> Result<(), String> {
+pub(crate) fn check_id(id: &str) -> Result<(), String> {
     if id.is_empty() || id.contains(['/', '\\', '.']) {
         return Err("invalid server id".to_string());
     }
@@ -131,6 +185,19 @@ pub async fn create_server(
         difficulty: "normal".to_string(),
         online_mode: true,
         pvp: true,
+        view_distance: 10,
+        simulation_distance: 10,
+        spawn_protection: 16,
+        level_name: "world".to_string(),
+        level_seed: String::new(),
+        hardcore: false,
+        allow_nether: true,
+        allow_flight: false,
+        enable_command_block: false,
+        force_gamemode: false,
+        white_list: false,
+        auto_restart: false,
+        backup_on_start: false,
     };
     save_server(&dir, &server)?;
     Ok(server)
@@ -204,6 +271,17 @@ fn write_properties(dir: &Path, server: &Server) -> Result<(), String> {
         ("difficulty", server.difficulty.clone()),
         ("online-mode", server.online_mode.to_string()),
         ("pvp", server.pvp.to_string()),
+        ("view-distance", server.view_distance.to_string()),
+        ("simulation-distance", server.simulation_distance.to_string()),
+        ("spawn-protection", server.spawn_protection.to_string()),
+        ("level-name", server.level_name.clone()),
+        ("level-seed", server.level_seed.clone()),
+        ("hardcore", server.hardcore.to_string()),
+        ("allow-nether", server.allow_nether.to_string()),
+        ("allow-flight", server.allow_flight.to_string()),
+        ("enable-command-block", server.enable_command_block.to_string()),
+        ("force-gamemode", server.force_gamemode.to_string()),
+        ("white-list", server.white_list.to_string()),
         // Without this a fresh server is unreachable on the LAN.
         ("enable-status", "true".to_string()),
     ];
@@ -371,26 +449,98 @@ pub async fn start_server(
     state: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
+    start_server_impl(&app, state.inner(), id).await
+}
+
+/// The real body, taking a plain `&AppState`.
+///
+/// Split out because the crash supervisor needs to restart a server from a
+/// spawned task, and `tauri::async_runtime::spawn` requires a `Send` future —
+/// which a future holding a `State` guard across an `.await` is not. A
+/// `&AppState` is `Send` (the struct is `Sync`), so this one is spawnable while
+/// the command wrapper stays the shape Tauri wants.
+async fn start_server_impl(app: &AppHandle, state: &AppState, id: String) -> Result<(), String> {
     check_id(&id)?;
-    if state.servers.running.lock().unwrap().contains_key(&id) {
+    // Bound to a local rather than tested inline. A `MutexGuard` created in an
+    // `if` condition stays alive for the whole `if` statement, and this
+    // function awaits further down — which is enough for the compiler to
+    // decide the whole future is `!Send` and refuse to let the auto-restart
+    // supervisor spawn it.
+    let already_running = state.servers.running.lock().unwrap().contains_key(&id);
+    if already_running {
         return Err("That server is already running.".to_string());
     }
 
-    let dir = server_dir(&state, &id);
+    let dir = server_dir(state, &id);
     let mut server = load_server(&dir).ok_or("no such server")?;
 
     if !server.eula_accepted {
         return Err("Accept the Minecraft EULA for this server first.".to_string());
     }
 
-    let java = {
+    // Same automatic provisioning the client launch uses: a server jar needs a
+    // JVM too, and "install Java 21 first" is no more acceptable here than it
+    // is for playing. The major version comes from the Minecraft version rather
+    // than from a version JSON — the manifest fetch only happens on the first
+    // start, and this has to work on every start.
+    let configured = {
         let s = state.settings.lock().unwrap();
         s.default_java.executable_path.clone()
-    }
-    .ok_or("No Java configured — set one in Settings first.")?;
+    };
+    let required_major = crate::commands::java_runtime::major_for_mc_version(&server.mc_version);
+    let java = {
+        let app_log = app.clone();
+        let id_log = id.clone();
+        crate::commands::java_runtime::ensure_java(
+            app,
+            &state.data_dir,
+            configured.as_deref(),
+            required_major,
+            None,
+            &move |line| {
+                let _ = app_log.emit(
+                    "server-log",
+                    serde_json::json!({ "serverId": id_log.clone(), "line": line }),
+                );
+            },
+        )
+        .await?
+    };
 
     write_properties(&dir, &server)?;
-    let jar = ensure_jar(&app, &dir, &server).await?;
+    let jar = ensure_jar(app, &dir, &server).await?;
+
+    // Snapshot before launching, if asked. Done here rather than after the
+    // process starts so the backup is genuinely of the world as it was — once
+    // the server is up it has the region files open and is writing to them.
+    if server.backup_on_start && dir.join(&server.level_name).is_dir() {
+        let _ = app.emit(
+            "server-log",
+            serde_json::json!({ "serverId": id, "line": "Backing up the world before start…" }),
+        );
+        match crate::commands::server_admin::snapshot_world(&dir, &server.level_name) {
+            Ok(backup) => {
+                let _ = app.emit(
+                    "server-log",
+                    serde_json::json!({
+                        "serverId": id,
+                        "line": format!("Backup written: {}", backup.file),
+                    }),
+                );
+            }
+            // A failed backup must not block the server from starting — that
+            // would turn an optional safety net into a single point of failure.
+            Err(e) => {
+                let _ = app.emit(
+                    "server-log",
+                    serde_json::json!({
+                        "serverId": id,
+                        "line": format!("Backup failed, starting anyway: {e}"),
+                    }),
+                );
+            }
+        }
+    }
 
     server.last_started = Some(chrono::Utc::now().to_rfc3339());
     save_server(&dir, &server)?;
@@ -426,7 +576,14 @@ pub async fn start_server(
     let (kill_tx, kill_rx) = tokio::sync::oneshot::channel();
     state.servers.running.lock().unwrap().insert(
         id.clone(),
-        RunningServer { stdin: in_tx, kill: kill_tx, ready: false },
+        RunningServer {
+            stdin: in_tx,
+            kill: kill_tx,
+            ready: false,
+            started: std::time::Instant::now(),
+            players: Vec::new(),
+            stopping: false,
+        },
     );
 
     // Console output, both streams into the same event.
@@ -452,6 +609,28 @@ pub async fn start_server(
                     }
                     let _ = app_log.emit("server-ready", id_log.clone());
                 }
+
+                // Who's online, straight off the console — the same lines a
+                // person reads. No query protocol, no RCON, nothing to
+                // configure, and it works identically on vanilla and Fabric.
+                if let Some(change) = parse_player_event(&line) {
+                    let st = app_log.state::<AppState>();
+                    // Named binding rather than a temporary in the `if let`
+                    // scrutinee: a guard created there outlives `st`, which the
+                    // borrow checker rejects.
+                    let mut running = st.servers.running.lock().unwrap();
+                    if let Some(r) = running.get_mut(&id_log) {
+                        match change {
+                            PlayerEvent::Joined(name) => {
+                                if !r.players.iter().any(|p| p == &name) {
+                                    r.players.push(name);
+                                }
+                            }
+                            PlayerEvent::Left(name) => r.players.retain(|p| p != &name),
+                        }
+                    }
+                }
+
                 let _ = app_log.emit(
                     "server-log",
                     serde_json::json!({ "serverId": id_log, "line": line }),
@@ -474,26 +653,113 @@ pub async fn start_server(
             }
         };
 
-        let st = app_wait.state::<AppState>();
-        st.servers.running.lock().unwrap().remove(&id_wait);
+        // Scoped tightly: this block now awaits further down for the
+        // auto-restart, and a `State` still in scope across an `.await` makes
+        // the whole task non-`Send` and unspawnable.
+        let was_stopping = {
+            let st = app_wait.state::<AppState>();
+            let entry = st.servers.running.lock().unwrap().remove(&id_wait);
+            // Absent means something already removed it — `kill_server` does,
+            // and that is a deliberate stop.
+            entry.map(|r| r.stopping).unwrap_or(true)
+        };
+
         let code = status.and_then(|s| s.code()).unwrap_or(-1);
         let _ = app_wait.emit(
             "server-stopped",
             serde_json::json!({ "serverId": id_wait, "exitCode": code }),
         );
+
+        // Auto-restart, but only on an exit nobody asked for. Restarting after
+        // the user pressed Stop would make the button appear broken, and
+        // restarting a server that crashes instantly would spin forever — so
+        // the crash case waits before coming back.
+        let crashed = !was_stopping && code != 0;
+        if crashed && crate::commands::server_admin::wants_auto_restart(&app_wait, &id_wait) {
+            let _ = app_wait.emit(
+                "server-log",
+                serde_json::json!({
+                    "serverId": id_wait,
+                    "line": format!(
+                        "Server exited with code {code}. Restarting in {RESTART_DELAY_SECS}s…"
+                    ),
+                }),
+            );
+            // Hand off to the restart worker rather than restarting here —
+            // see `start_restart_worker`. Cloned out of the state so nothing
+            // borrowed from it outlives this scope.
+            let queue = {
+                let st = app_wait.state::<AppState>();
+                st.servers.restart_tx.get().cloned()
+            };
+            if let Some(tx) = queue {
+                let _ = tx.send(id_wait.clone());
+            }
+        }
     });
 
     Ok(())
+}
+
+/// A join or leave, read off a console line.
+enum PlayerEvent {
+    Joined(String),
+    Left(String),
+}
+
+/// Pull a player join/leave out of a console line.
+///
+/// The lines look like:
+/// `[12:34:56] [Server thread/INFO]: Steve joined the game`
+///
+/// Matching on the suffix and taking the last word before it is deliberately
+/// loose: the prefix format has changed between versions and differs again
+/// under Fabric, but the sentence itself is a translation key that has been
+/// stable for a decade. Chat is the one thing that could spoof this, so the
+/// name is required to look like a Minecraft username.
+fn parse_player_event(line: &str) -> Option<PlayerEvent> {
+    // A chat message renders as `<Steve> ...`, so anything containing the
+    // chat bracket form is not a system line.
+    if line.contains(": <") {
+        return None;
+    }
+
+    let body = line.rsplit_once("]: ").map(|(_, rest)| rest).unwrap_or(line).trim();
+
+    let (name, joined) = if let Some(n) = body.strip_suffix(" joined the game") {
+        (n, true)
+    } else if let Some(n) = body.strip_suffix(" left the game") {
+        (n, false)
+    } else {
+        return None;
+    };
+
+    if !is_username(name) {
+        return None;
+    }
+    Some(if joined {
+        PlayerEvent::Joined(name.to_string())
+    } else {
+        PlayerEvent::Left(name.to_string())
+    })
+}
+
+/// Minecraft usernames are 3–16 of `[A-Za-z0-9_]`.
+fn is_username(s: &str) -> bool {
+    (3..=16).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Ask the server to shut down cleanly, so the world is saved.
 #[tauri::command]
 pub async fn stop_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
     check_id(&id)?;
-    let running = state.servers.running.lock().unwrap();
-    let Some(r) = running.get(&id) else {
+    let mut running = state.servers.running.lock().unwrap();
+    let Some(r) = running.get_mut(&id) else {
         return Err("That server isn't running.".to_string());
     };
+    // Flagged before the command goes out, so the supervisor knows this exit
+    // was asked for and must not auto-restart.
+    r.stopping = true;
     // `stop` rather than killing the process: Minecraft flushes chunks on this
     // command, and killing it instead is how worlds get corrupted.
     let _ = r.stdin.send("stop".to_string());
@@ -542,6 +808,8 @@ pub async fn server_statuses(state: State<'_, AppState>) -> Result<Vec<ServerSta
             running: true,
             ready: r.ready,
             lan_address: lan.clone(),
+            players: r.players.clone(),
+            uptime_seconds: r.started.elapsed().as_secs(),
         })
         .collect())
 }
@@ -579,6 +847,19 @@ mod tests {
             difficulty: "peaceful".into(),
             online_mode: false,
             pvp: false,
+            view_distance: 12,
+            simulation_distance: 8,
+            spawn_protection: 0,
+            level_name: "world".into(),
+            level_seed: String::new(),
+            hardcore: false,
+            allow_nether: true,
+            allow_flight: true,
+            enable_command_block: false,
+            force_gamemode: false,
+            white_list: false,
+            auto_restart: false,
+            backup_on_start: false,
         }
     }
 
@@ -588,7 +869,9 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
             dir.join("server.properties"),
-            "#a comment\nview-distance=16\nmotd=old\n",
+            // `enable-rcon` and `resource-pack` are not ours; `view-distance`
+            // and `motd` are.
+            "#a comment\nenable-rcon=true\nresource-pack=https://example/pack.zip\nview-distance=16\nmotd=old\n",
         )
         .unwrap();
 
@@ -596,12 +879,69 @@ mod tests {
         let out = std::fs::read_to_string(dir.join("server.properties")).unwrap();
 
         assert!(out.contains("#a comment"), "comments must survive");
-        assert!(out.contains("view-distance=16"), "unmanaged keys must survive");
+        assert!(out.contains("enable-rcon=true"), "unmanaged keys must survive");
+        assert!(
+            out.contains("resource-pack=https://example/pack.zip"),
+            "unmanaged values containing '=' must survive intact"
+        );
         assert!(out.contains("motd=hi"), "managed keys must be replaced");
         assert!(!out.contains("motd=old"));
+        assert!(out.contains("view-distance=12"), "newly managed keys must be replaced");
+        assert!(!out.contains("view-distance=16"));
         assert!(out.contains("server-port=25577"), "missing keys appended");
+        assert!(out.contains("white-list=false"), "new managed keys appended");
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    fn joined(line: &str) -> Option<String> {
+        match parse_player_event(line) {
+            Some(PlayerEvent::Joined(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    fn left(line: &str) -> Option<String> {
+        match parse_player_event(line) {
+            Some(PlayerEvent::Left(n)) => Some(n),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn reads_joins_and_leaves_off_the_console() {
+        assert_eq!(
+            joined("[12:34:56] [Server thread/INFO]: Steve joined the game").as_deref(),
+            Some("Steve")
+        );
+        assert_eq!(
+            left("[12:34:56] [Server thread/INFO]: Steve left the game").as_deref(),
+            Some("Steve")
+        );
+        // Fabric and modded servers prefix differently; the sentence is what
+        // we key on, so those still parse.
+        assert_eq!(
+            joined("[Server thread/INFO] [minecraft/MinecraftServer]: Alex_99 joined the game")
+                .as_deref(),
+            Some("Alex_99")
+        );
+    }
+
+    #[test]
+    fn ignores_chat_that_looks_like_a_join() {
+        // Someone typing "Mallory joined the game" in chat must not add a
+        // phantom player to the list.
+        assert!(parse_player_event(
+            "[12:34:56] [Server thread/INFO]: <Steve> Mallory joined the game"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn ignores_lines_that_are_not_player_events() {
+        assert!(parse_player_event("[12:34:56] [Server thread/INFO]: Done (5.1s)!").is_none());
+        // A name that isn't a legal username is not a player.
+        assert!(parse_player_event("[Server thread/INFO]: xx joined the game").is_none());
     }
 
     #[test]

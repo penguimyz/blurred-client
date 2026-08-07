@@ -161,9 +161,30 @@ with a `GLIBC_x.y not found` error. That's why CI pins 22.04 rather than
   something that needs fixing; `ROADMAP.md` lists the known gaps (asset
   sync being the biggest one).
 
-## If `list_detected_java` finds nothing
+## Java
 
-JVM detection (`src-tauri/src/commands/java.rs`) looks in:
+**You do not need Java installed.** Blurred resolves a JVM in this order
+(`src-tauri/src/commands/java_runtime.rs`):
+
+1. A path you set in Settings → Default Java, if you set one.
+2. A runtime Blurred downloaded earlier, kept per component under
+   `<data>/java/<component>/` and shared by every instance that needs it.
+3. A JVM already installed on this machine whose major version fits — exact
+   match preferred, newer accepted.
+4. Otherwise it downloads Mojang's own runtime for the version being launched,
+   verifies every file against the published SHA-1, and uses that. It happens
+   once, with a progress banner, and covers hosted servers too.
+
+Which runtime is needed comes from the `javaVersion` block in Minecraft's own
+version JSON, so it's the exact JRE that version was tested against.
+
+**The one exception is 64-bit ARM Linux**, for which Mojang publishes no
+runtime. There you do have to install a JDK yourself and point Settings at it;
+the error message says so rather than downloading an x86 build that can't run.
+
+### If JVM detection finds nothing
+
+Detection (`src-tauri/src/commands/java.rs`) looks in:
 
 - **Windows** — `JAVA_HOME`, common install roots (`C:\Program Files\Java`,
   Eclipse Adoptium/Temurin, Microsoft, Zulu), and the `JavaSoft` registry keys.
@@ -174,9 +195,9 @@ JVM detection (`src-tauri/src/commands/java.rs`) looks in:
   usual `/usr/bin/java` → `/usr/lib/jvm/default-java` → real JDK chain — are
   resolved and listed once.
 
-If your Java is somewhere none of that covers, open the generated
-`settings.json` and set `defaultJava.executablePath` by hand (`javaw.exe` on
-Windows, `bin/java` elsewhere).
+If your Java is somewhere none of that covers, it doesn't matter much — step 4
+above kicks in and Blurred fetches its own. To force a specific JVM anyway, set
+it in Settings → Default Java (`javaw.exe` on Windows, `bin/java` elsewhere).
 
 ## Project layout
 

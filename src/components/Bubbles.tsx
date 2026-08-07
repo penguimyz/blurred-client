@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { recordBubblePop } from "../lib/bubbleCounter";
 
 /**
  * Bubbles that drift up through the water — and pop when you click them.
@@ -13,6 +14,15 @@ import { useEffect, useRef } from "react";
  * That's the whole trick: a canvas that could be clicked would sit over the
  * entire UI and swallow every press. This way the bubbles are a layer you can
  * interact with that costs the rest of the app nothing.
+ *
+ * # Why the canvas sits behind the UI
+ *
+ * The bubbles used to float over the panels. They now drift *behind* them, with
+ * the sea life, so the water reads as something the interface is submerged in
+ * rather than something smeared across it. That makes the hit test do slightly
+ * more work: a bubble hidden under a card must not pop, because popping
+ * something you cannot see is just a click that swallowed itself. See
+ * {@link occluded}.
  *
  * Drawn as pixel blocks on a grid to match the rest of the art.
  */
@@ -81,6 +91,10 @@ export function Bubbles() {
     }
 
     function onPointerDown(e: MouseEvent) {
+      // The canvas is behind the interface now, so a bubble under a panel is
+      // invisible and must not be poppable.
+      if (occluded(e.clientX, e.clientY)) return;
+
       // Nearest bubble wins, so overlapping ones pop predictably.
       let best = -1;
       let bestDist = Infinity;
@@ -96,7 +110,10 @@ export function Bubbles() {
       }
       // No preventDefault and no stopPropagation: the click must still reach
       // whatever UI is underneath.
-      if (best >= 0) bubbles[best].popping = 6;
+      if (best >= 0) {
+        bubbles[best].popping = 6;
+        recordBubblePop();
+      }
     }
 
     window.addEventListener("mousedown", onPointerDown, true);
@@ -158,13 +175,44 @@ export function Bubbles() {
       style={{
         position: "fixed",
         inset: 0,
-        // Above panels so bubbles are visible and clickable anywhere, below
-        // modals and the title bar.
-        zIndex: 140,
+        // Behind the interface, on the same layer as the sea life. DOM order in
+        // App.tsx puts the bubbles in front of the backdrop gradient and the
+        // creatures, and every panel in front of all three.
+        zIndex: -1,
         pointerEvents: "none",
       }}
     />
   );
+}
+
+/**
+ * Is this point covered by a piece of interface?
+ *
+ * Walks up from whatever is under the cursor looking for an ancestor that
+ * actually paints something — a non-transparent background or a backdrop
+ * filter. Deliberately generic rather than a list of class names: the test is
+ * "would this hide a bubble", and any future card, modal or toast should be
+ * caught without anyone remembering to add it here.
+ */
+function occluded(x: number, y: number): boolean {
+  let el = document.elementFromPoint(x, y) as HTMLElement | null;
+  while (el && el !== document.body && el !== document.documentElement) {
+    const style = window.getComputedStyle(el);
+    if (style.backdropFilter && style.backdropFilter !== "none") return true;
+
+    const bg = style.backgroundColor;
+    if (bg && bg !== "transparent") {
+      // rgb(...) is fully opaque; rgba(...) needs its alpha read out.
+      const alpha = bg.startsWith("rgba")
+        ? Number.parseFloat(bg.slice(bg.lastIndexOf(",") + 1))
+        : 1;
+      if (Number.isFinite(alpha) && alpha > 0.05) return true;
+    }
+    if (style.backgroundImage && style.backgroundImage !== "none") return true;
+
+    el = el.parentElement;
+  }
+  return false;
 }
 
 /** A ring of blocks with a highlight — a bubble at pixel-art resolution. */

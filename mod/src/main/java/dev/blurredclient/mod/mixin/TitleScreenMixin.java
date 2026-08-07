@@ -1,6 +1,6 @@
 package dev.blurredclient.mod.mixin;
 
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.TitleScreen;
@@ -29,7 +29,8 @@ public class TitleScreenMixin {
     @Inject(method = "renderBackground", at = @At("HEAD"), cancellable = true)
     private void blurred$submarineBackground(
             DrawContext ctx, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (!BlurredConfig.get().styleMenus) {
+        // Essential replaces the title screen too; see Essential#shouldStyleMenus.
+        if (!Essential.shouldStyleMenus()) {
             return;
         }
 

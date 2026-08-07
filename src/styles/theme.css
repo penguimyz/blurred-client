@@ -605,6 +605,34 @@ input[type="range"] {
   flex: 1;
 }
 
+/*
+  Lifetime bubble-pop tally. Sits with the wordmark rather than in the control
+  cluster on the right — it's a curio, not a window control, and putting it
+  next to the close button would invite mis-clicks.
+*/
+.titlebar-bubbles {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  background: rgba(125, 226, 240, 0.07);
+  border: 1px solid var(--glass-border);
+  /* Scale on pop; the transform is set inline by the component. */
+  transform-origin: center;
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .titlebar-bubbles {
+    transition: none;
+  }
+}
+
 .titlebar-controls {
   display: flex;
   height: 100%;
