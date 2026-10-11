@@ -2,7 +2,7 @@ package dev.blurredclient.mod.social;
 
 import dev.blurredclient.mod.BlurredMod;
 import dev.blurredclient.mod.bridge.LauncherBridge;
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.server.integrated.IntegratedServer;
 
@@ -73,7 +73,7 @@ public final class LanWorlds {
 
     /** The address to hand out, or empty when there's nothing to hand out. */
     private static String address(MinecraftClient client) {
-        if (!BlurredConfig.get().announceLanWorlds || !BlurredConfig.get().shareServer) {
+        if (!Modules.CREW.announceLan()) {
             return "";
         }
         IntegratedServer server = client.getServer();

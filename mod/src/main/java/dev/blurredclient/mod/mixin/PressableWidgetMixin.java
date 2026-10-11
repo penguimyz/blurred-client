@@ -2,10 +2,14 @@ package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
+import dev.blurredclient.mod.ui.kit.PixelSkin;
+import dev.blurredclient.mod.ui.kit.Skin;
+import dev.blurredclient.mod.ui.kit.Skins;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.PressableWidget;
 import net.minecraft.client.gui.widget.TexturedButtonWidget;
 import org.spongepowered.asm.mixin.Mixin;
@@ -37,10 +41,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * a bug that was reported:
  *
  * <ul>
- *   <li><b>Other mods' widgets.</b> A voice-chat mod's mute and deafen buttons
- *       are {@code PressableWidget} subclasses that render their own icons.
- *       Styling them threw the icon away and drew the accessibility label in
- *       its place. No mod's custom widget is ours to repaint.</li>
+ *   <li><b>Widgets that aren't plain buttons.</b> A voice-chat mod's mute and
+ *       deafen buttons are {@code PressableWidget} subclasses that render their
+ *       own icons; styling them threw the icon away and drew the accessibility
+ *       label in its place.
+ *       <p>This started as "nothing outside {@code net.minecraft}", which was
+ *       too blunt in the visible direction: Mod Menu's <em>Mods</em> button sits
+ *       in the middle of the title screen looking like stock vanilla grey while
+ *       everything around it is ocean blue, which is worse than either
+ *       extreme. The test is now whether it's a {@link ButtonWidget} — the
+ *       class mods use when they want a normal button — with vanilla's own
+ *       widgets still allowed on top of that, so this can only ever style more
+ *       than before, never less.</li>
  *   <li><b>Container screens.</b> Inventory, crafting, chests and every modded
  *       GUI built on {@link HandledScreen}. Their buttons sit on top of a
  *       texture, next to item slots, and are almost all icons — the recipe
@@ -68,20 +80,43 @@ public class PressableWidgetMixin {
             return;
         }
 
-        OceanUi.button(
-                ctx,
-                MinecraftClient.getInstance().textRenderer,
-                self.getMessage(),
-                self.getX(), self.getY(), self.getWidth(), self.getHeight(),
-                self.isHovered(), self.active);
+        var font = MinecraftClient.getInstance().textRenderer;
+        Skin skin = Skins.current();
+        if (skin == PixelSkin.INSTANCE) {
+            OceanUi.button(ctx, font, self.getMessage(),
+                    self.getX(), self.getY(), self.getWidth(), self.getHeight(),
+                    self.isHovered(), self.active, blurred$isOurScreen());
+        } else {
+            skin.button(ctx, font, self.getMessage().getString(),
+                    self.getX(), self.getY(), self.getWidth(), self.getHeight(),
+                    self.isHovered() ? 1f : 0f, false, self.active, false);
+        }
         ci.cancel();
     }
 
+    /**
+     * Is the screen on show one of ours?
+     *
+     * <p>Decides whether a button gets rounded corners. Vanilla's menus are
+     * square throughout, and a single rounded button among them reads as a
+     * rendering fault rather than as styling — so the curve is reserved for the
+     * screens the mod draws itself, where everything is rounded and it looks
+     * deliberate.
+     */
+    private static boolean blurred$isOurScreen() {
+        Screen screen = MinecraftClient.getInstance().currentScreen;
+        return screen != null && screen.getClass().getName().startsWith("dev.blurredclient.mod.screen");
+    }
+
     private static boolean blurred$shouldStyle(PressableWidget self) {
-        // Only vanilla's own widgets. Another mod's button draws whatever that
-        // mod decided it draws, and replacing it is never an improvement.
+        // Vanilla's own widgets, plus anyone's ButtonWidget. A mod that wants a
+        // normal button builds a ButtonWidget; a mod that wants to draw
+        // something of its own subclasses further, and lands in the icon tests
+        // below. The vanilla-package clause is kept as well as, not instead of,
+        // this — so relaxing the rule cannot un-style anything that used to be
+        // styled.
         String owner = self.getClass().getName();
-        if (!owner.startsWith("net.minecraft.")) {
+        if (!owner.startsWith("net.minecraft.") && !(self instanceof ButtonWidget)) {
             return false;
         }
 

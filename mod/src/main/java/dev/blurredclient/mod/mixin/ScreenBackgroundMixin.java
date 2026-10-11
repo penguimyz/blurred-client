@@ -2,6 +2,9 @@ package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
+import dev.blurredclient.mod.ui.kit.Backdrop;
+import dev.blurredclient.mod.ui.kit.PixelSkin;
+import dev.blurredclient.mod.ui.kit.Skins;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
@@ -30,12 +33,21 @@ public class ScreenBackgroundMixin {
         }
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world != null) {
+            // Cinematic containers: no blur or dim, so the open block shows.
+            if ((Object) this instanceof net.minecraft.client.gui.screen.ingame.HandledScreen<?>
+                    && dev.blurredclient.mod.module.Modules.CINEMATIC_CONTAINERS.clearBackground()) {
+                ci.cancel();
+            }
             return;
         }
 
         Screen self = (Screen) (Object) this;
-        OceanUi.tick(delta);
-        OceanUi.background(ctx, self.width, self.height);
+        if (Skins.current() == PixelSkin.INSTANCE) {
+            OceanUi.tick(delta);
+            OceanUi.background(ctx, self.width, self.height);
+        } else {
+            Backdrop.drawScreen(ctx, self.width, self.height, mouseX, mouseY);
+        }
         ci.cancel();
     }
 }

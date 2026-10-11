@@ -1,6 +1,6 @@
 package dev.blurredclient.mod.social;
 
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import net.fabricmc.loader.api.FabricLoader;
 
 /**
@@ -53,10 +53,9 @@ public final class Essential {
      * so the two don't paint over each other.
      */
     public static boolean shouldStyleMenus() {
-        BlurredConfig cfg = BlurredConfig.get();
-        if (!cfg.styleMenus) {
+        if (!Modules.MENU_THEME.isActive()) {
             return false;
         }
-        return !(cfg.deferToEssential && isPresent());
+        return !(Modules.MENU_THEME.deferToEssential() && isPresent());
     }
 }

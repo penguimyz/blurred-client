@@ -1,7 +1,7 @@
 package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.Theme;
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import dev.blurredclient.mod.social.BlurredUsers;
 import dev.blurredclient.mod.ui.BlurredFont;
 import dev.blurredclient.mod.ui.Draw;
@@ -54,12 +54,11 @@ public class PlayerListPingMixin {
     private void blurred$drawPingNumber(
             DrawContext ctx, int width, int x, int y, PlayerListEntry entry, CallbackInfo ci) {
 
-        BlurredConfig cfg = BlurredConfig.get();
         MinecraftClient client = MinecraftClient.getInstance();
 
-        boolean badge = cfg.showClientBadge && BlurredUsers.isBlurredUser(blurred$nameOf(entry));
+        boolean badge = Modules.CLIENT_BADGE.isActive() && BlurredUsers.isBlurredUser(blurred$nameOf(entry));
 
-        if (!cfg.numericPing) {
+        if (!Modules.NUMERIC_PING.isActive()) {
             // Still badge them, then let vanilla draw its bars where it wants.
             if (badge) {
                 HudRenderer.porthole(ctx, x + width - 15, y + 4, 3);

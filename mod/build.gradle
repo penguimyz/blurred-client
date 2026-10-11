@@ -32,6 +32,67 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Unit tests cover the parts with no game dependency: settings, placement
+    // maths, config migration, profiles.
+    testImplementation platform('org.junit:junit-bom:5.11.4')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// `./gradlew :1.21.11:runClient -PdevScreen=kit` opens a dev-only screen on
+// startup (see BlurredMod#openDevScreen).
+loom {
+    runs {
+        client {
+            if (project.hasProperty('devScreen')) {
+                vmArg "-Dblurred.devScreen=${project.property('devScreen')}"
+            }
+            if (project.hasProperty('devScript')) {
+                vmArg "-Dblurred.devScript=${project.property('devScript')}"
+            }
+            // -PdevSize=1920x1080 to check rendering at a real resolution.
+            if (project.hasProperty('devSize')) {
+                def (w, h) = project.property('devSize').toString().split('x')
+                programArgs '--width', w, '--height', h
+            }
+        }
+    }
+}
+
+// In-game tests (1.21.11, the version played day to day): a throwaway world,
+// simulated input, screenshots. `./gradlew :1.21.11:runClientGameTest`.
+// Never touches the normal run folder or a real game.
+if (mcVersion == '1.21.11') {
+    fabricApi {
+        configureTests {
+            createSourceSet = true
+            modId = 'blurred-gametest'
+            enableGameTests = false
+            enableClientGameTests = true
+            eula = true
+        }
+    }
+    loom {
+        runs {
+            clientGameTest {
+                vmArg "-Dfabric.client.gametest.disableNetworkSynchronizer=true"
+                if (project.hasProperty('only')) {
+                    vmArg "-Dblurred.only=${project.property('only')}"
+                }
+            }
+        }
+    }
+    sourceSets {
+        gametest {
+            java.srcDirs = [rootProject.file('src/gametest/java')]
+            resources.srcDirs = [rootProject.file('src/gametest/resources')]
+        }
+    }
 }
 
 processResources {

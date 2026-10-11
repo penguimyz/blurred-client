@@ -1,6 +1,6 @@
 package dev.blurredclient.mod.mixin;
 
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import dev.blurredclient.mod.cosmetic.CapeManager;
 import net.minecraft.client.network.AbstractClientPlayerEntity;
 import net.minecraft.util.Identifier;
@@ -63,7 +63,7 @@ public class PlayerSkinTexturesMixin {
         cir.setReturnValue(cir.getReturnValue().withOverride(SkinTextures.SkinOverride.create(
                 Optional.empty(),   // body — leave the player's own skin
                 Optional.of(asset), // cape
-                Optional.of(asset), // elytra, so a worn elytra matches
+                Optional.of(blurred$capeHasElytra() ? asset : blurred$vanillaElytra()),
                 Optional.empty()))); // model — leave classic/slim alone
     }
     //?} else {
@@ -78,11 +78,49 @@ public class PlayerSkinTexturesMixin {
                 original.texture(),
                 original.textureUrl(),
                 cape,
-                original.elytraTexture() == null ? cape : original.elytraTexture(),
+                blurred$capeHasElytra() ? cape : BLURRED$VANILLA_ELYTRA,
                 original.model(),
                 original.secure()));
     }
      *///?}
+
+    /**
+     * Vanilla's own elytra texture.
+     *
+     * <p>The path moved when the equipment model system landed: it's
+     * {@code textures/entity/elytra.png} up to 1.21.1 and
+     * {@code textures/entity/equipment/wings/elytra.png} from 1.21.4 on.
+     */
+    //? if >=1.21.4 {
+    private static final Identifier BLURRED$VANILLA_ELYTRA =
+            Identifier.ofVanilla("textures/entity/equipment/wings/elytra.png");
+    //?} else {
+    /*private static final Identifier BLURRED$VANILLA_ELYTRA =
+            Identifier.ofVanilla("textures/entity/elytra.png");
+     *///?}
+
+    //? if >=1.21.10 {
+    /** The vanilla elytra, wrapped as the asset the newer API expects. */
+    private AssetInfo.TextureAssetInfo blurred$vanillaElytra() {
+        return new AssetInfo.TextureAssetInfo(BLURRED$VANILLA_ELYTRA, BLURRED$VANILLA_ELYTRA);
+    }
+    //?}
+
+    /**
+     * Should this cape take over the elytra too?
+     *
+     * <p>Only when its sheet actually has wings painted on it. Wearing an
+     * elytra makes the game render it <em>from the cape texture</em>, so
+     * pointing it at a sheet whose elytra half is blank draws fully
+     * transparent wings — the elytra disappears off your back. See
+     * {@link CapeManager#hasElytraArt}.
+     *
+     * <p>A boolean rather than the override itself, because the type that
+     * override is expressed in differs between versions and this doesn't.
+     */
+    private boolean blurred$capeHasElytra() {
+        return CapeManager.hasElytraArt(blurred$selfName());
+    }
 
     /**
      * The cape for the player this mixin is applied to, or null.
@@ -92,15 +130,25 @@ public class PlayerSkinTexturesMixin {
      * version-specific.
      */
     private Identifier blurred$capeForSelf() {
-        if (!BlurredConfig.get().showCapes) {
+        if (!Modules.CAPES.isActive()) {
             return null;
         }
+        String name = blurred$selfName();
+        return name == null ? null : CapeManager.capeFor(name);
+    }
+
+    /**
+     * This player's account name.
+     *
+     * <p>Mojang's {@code GameProfile} became a record in the authlib that ships
+     * with 1.21.9, so the accessor lost its {@code get} prefix.
+     */
+    private String blurred$selfName() {
         AbstractClientPlayerEntity self = (AbstractClientPlayerEntity) (Object) this;
         //? if >=1.21.10 {
-        String name = self.getGameProfile().name();
+        return self.getGameProfile().name();
         //?} else {
-        /*String name = self.getGameProfile().getName();
+        /*return self.getGameProfile().getName();
          *///?}
-        return name == null ? null : CapeManager.capeFor(name);
     }
 }

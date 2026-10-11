@@ -2,12 +2,16 @@ package dev.blurredclient.mod;
 
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.hud.CpsTracker;
 import dev.blurredclient.mod.hud.HudRenderer;
-import dev.blurredclient.mod.screen.ConfigScreen;
+import dev.blurredclient.mod.module.Modules;
+import dev.blurredclient.mod.screen.clickgui.ClickGuiScreen;
 import dev.blurredclient.mod.screen.CosmeticsScreen;
 import dev.blurredclient.mod.screen.CrewScreen;
+import dev.blurredclient.mod.social.DiscordPresence;
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.social.LanWorlds;
+import dev.blurredclient.mod.social.Whispers;
 import dev.blurredclient.mod.ui.BlurredFont;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -41,6 +45,7 @@ public class BlurredMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("Blurred");
 
     private static KeyBinding openCrew;
+    private static KeyBinding openMenu;
 
     /**
      * Last server address reported to the launcher. Kept so the per-tick check
@@ -55,7 +60,7 @@ public class BlurredMod implements ClientModInitializer {
     public void onInitializeClient() {
         LOGGER.info("Blurred companion starting");
 
-        BlurredConfig.get();
+        BlurredConfig.load();
         LauncherBridge.get().start();
 
         if (Essential.isPresent()) {
@@ -71,16 +76,51 @@ public class BlurredMod implements ClientModInitializer {
         //? if >=1.21.10 {
         openCrew = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.blurred.crew", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_O, KeyBinding.Category.MISC));
+        openMenu = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.blurred.settings", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, KeyBinding.Category.MISC));
+        Modules.ZOOM.bindKey(KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.blurred.zoom", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, KeyBinding.Category.MISC)));
         //?} else {
         /*openCrew = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.blurred.crew", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_O, "category.blurred"));
+        openMenu = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.blurred.settings", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_RIGHT_SHIFT, "category.blurred"));
+        Modules.ZOOM.bindKey(KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.blurred.zoom", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, "category.blurred")));
          *///?}
 
+        dev.blurredclient.mod.fx.WorldDraw.init();
+        dev.blurredclient.mod.fx.Reconnect.init();
+        dev.blurredclient.mod.fx.ShaderFx.register();
+        dev.blurredclient.mod.fx.FoliageMarks.register();
+        dev.blurredclient.mod.fx.SwordPacks.register();
+        dev.blurredclient.mod.fx.WorldDraw.add(f -> Modules.ITEM_SKINS.frame());
+        dev.blurredclient.mod.fx.WorldDraw.add(f -> {
+            if (Modules.MOTION_BLUR.isActive()) {
+                dev.blurredclient.mod.fx.MotionBlurState.capture(f);
+            }
+        });
+        net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents.DISCONNECT.register(
+                (handler, client) -> dev.blurredclient.mod.fx.CombatEvents.reset());
+        dev.blurredclient.mod.fx.WorldDraw.add(dev.blurredclient.mod.fx.ContainerView.INSTANCE);
+        dev.blurredclient.mod.fx.WorldDraw.addLate(dev.blurredclient.mod.fx.ContainerView.INSTANCE::renderGrid);
+        dev.blurredclient.mod.fx.WorldDraw.add(dev.blurredclient.mod.fx.Hologram.INSTANCE);
         HudRenderCallback.EVENT.register((context, tickCounter) ->
                 HudRenderer.render(context, MinecraftClient.getInstance()));
 
+        ClientTickEvents.START_CLIENT_TICK.register(CpsTracker::onTickStart);
         ClientTickEvents.END_CLIENT_TICK.register(BlurredMod::onTick);
+        // Client-side only: fires when *you* attack, used for hit particles.
+        net.fabricmc.fabric.api.event.player.AttackEntityCallback.EVENT.register((player, world, hand, entity, hit) -> {
+            if (world.isClient()) {
+                dev.blurredclient.mod.fx.CombatEvents.attacked(entity);
+                Modules.HIT_EFFECTS.onHit(entity);
+                Modules.TARGET_RING.onHit(entity);
+            }
+            return net.minecraft.util.ActionResult.PASS;
+        });
         registerMenuButtons();
+        Runtime.getRuntime().addShutdownHook(new Thread(dev.blurredclient.mod.hud.SystemMedia::stop, "Blurred media stop"));
     }
 
     /**
@@ -93,6 +133,14 @@ public class BlurredMod implements ClientModInitializer {
      */
     private static void registerMenuButtons() {
         ScreenEvents.AFTER_INIT.register((client, screen, width, height) -> {
+            openDevScreen(client, screen);
+            dev.blurredclient.mod.fx.ContainerView.INSTANCE.onScreenInit(screen, width, height);
+            // Cinematic containers: move the inventory to the right so the block shows.
+            if (screen instanceof net.minecraft.client.gui.screen.ingame.HandledScreen<?> handled
+                    && Modules.CINEMATIC_CONTAINERS.moveAside()) {
+                var acc = (dev.blurredclient.mod.mixin.HandledScreenAccessor) handled;
+                acc.blurred$setX(width - acc.blurred$backgroundWidth() - 24);
+            }
             boolean title = screen instanceof TitleScreen;
             boolean pause = screen instanceof GameMenuScreen;
             if (!title && !pause) {
@@ -120,10 +168,46 @@ public class BlurredMod implements ClientModInitializer {
 
             Screens.getButtons(screen).add(ButtonWidget.builder(
                             BlurredFont.apply(Text.translatable("menu.blurred.settings")),
-                            b -> client.setScreen(new ConfigScreen(screen)))
+                            b -> client.setScreen(new ClickGuiScreen(screen)))
                     .dimensions(x, y + 48, 92, 20)
                     .build());
         });
+    }
+
+    /** The key currently bound to open the mod menu, so the menu can close on it too. */
+    public static int menuKeyCode() {
+        return openMenu == null ? -1 : KeyBindingHelper.getBoundKeyOf(openMenu).getCode();
+    }
+
+    private static boolean devScreenOpened;
+
+    /**
+     * In a development run started with {@code -PdevScreen=kit}, jump straight
+     * from the title screen to the UI kit test screen. Never active in a
+     * release build: it's gated on Fabric's development-environment flag.
+     */
+    private static void openDevScreen(MinecraftClient client, net.minecraft.client.gui.screen.Screen screen) {
+        boolean title = screen instanceof TitleScreen
+                || screen instanceof dev.blurredclient.mod.screen.title.BlurredTitleScreen;
+        if (devScreenOpened || !title
+                || !net.fabricmc.loader.api.FabricLoader.getInstance().isDevelopmentEnvironment()) {
+            return;
+        }
+        String which = System.getProperty("blurred.devScreen");
+        if ("kit".equals(which)) {
+            devScreenOpened = true;
+            client.send(() -> client.setScreen(new dev.blurredclient.mod.screen.KitTestScreen()));
+        } else if ("hud".equals(which)) {
+            devScreenOpened = true;
+            // Turn every HUD module on so the editor shows them all.
+            for (var m : dev.blurredclient.mod.module.Modules.hud()) {
+                m.setEnabled(true);
+            }
+            client.send(() -> client.setScreen(new dev.blurredclient.mod.screen.HudEditorScreen(screen)));
+        } else if ("clickgui".equals(which)) {
+            devScreenOpened = true;
+            client.send(() -> client.setScreen(new ClickGuiScreen(screen)));
+        }
     }
 
     /**
@@ -145,8 +229,30 @@ public class BlurredMod implements ClientModInitializer {
         while (openCrew.wasPressed()) {
             client.setScreen(new CrewScreen());
         }
+        while (openMenu.wasPressed()) {
+            if (client.currentScreen == null) {
+                if (Modules.HOLOGRAM.isActive() && client.world != null) {
+                    dev.blurredclient.mod.fx.Hologram.INSTANCE.toggle();
+                } else {
+                    client.setScreen(new ClickGuiScreen(null));
+                }
+            }
+        }
 
         trackServer(client);
+        dev.blurredclient.mod.fx.KeyToggles.tick(client);
+        dev.blurredclient.mod.fx.Reconnect.track(client);
+        dev.blurredclient.mod.fx.ShaderFx.tick(client);
+        dev.blurredclient.mod.fx.SwordPacks.tick(client);
+        dev.blurredclient.mod.fx.EntityCulling.tick(client);
+        Modules.NOW_PLAYING.tickWatcher();
+
+        for (var m : Modules.REGISTRY.all()) {
+            if (m instanceof dev.blurredclient.mod.module.feature.Ticking t && m.isActive()) {
+                t.tick(client);
+            }
+        }
+        DiscordPresence.update(client);
     }
 
     /**
@@ -159,7 +265,7 @@ public class BlurredMod implements ClientModInitializer {
      * than a frame of ambiguity.
      */
     private static void trackServer(MinecraftClient client) {
-        if (!BlurredConfig.get().shareServer) {
+        if (!Modules.CREW.shareServer()) {
             if (!reportedServer.isEmpty()) {
                 reportedServer = "";
                 LauncherBridge.get().reportServer("");
@@ -173,6 +279,10 @@ public class BlurredMod implements ClientModInitializer {
             LanWorlds.reset();
             if (!entry.address.equals(reportedServer)) {
                 reportedServer = entry.address;
+                // A different server is a different set of people, and a
+                // whisper thread with someone who isn't here any more is a
+                // conversation you can't continue. Drop it with the server.
+                Whispers.reset();
                 LauncherBridge.get().reportServer(reportedServer);
             }
             return;

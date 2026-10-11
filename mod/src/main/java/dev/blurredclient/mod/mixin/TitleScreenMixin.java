@@ -2,6 +2,9 @@ package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
+import dev.blurredclient.mod.ui.kit.Backdrop;
+import dev.blurredclient.mod.ui.kit.PixelSkin;
+import dev.blurredclient.mod.ui.kit.Skins;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.TitleScreen;
 import org.spongepowered.asm.mixin.Mixin;
@@ -35,6 +38,11 @@ public class TitleScreenMixin {
         }
 
         TitleScreen self = (TitleScreen) (Object) this;
+        if (Skins.current() != PixelSkin.INSTANCE) {
+            Backdrop.drawScreen(ctx, self.width, self.height, mouseX, mouseY);
+            ci.cancel();
+            return;
+        }
         OceanUi.tick(delta);
         OceanUi.background(ctx, self.width, self.height);
 

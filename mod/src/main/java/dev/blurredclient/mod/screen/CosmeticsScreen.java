@@ -5,6 +5,7 @@ import dev.blurredclient.mod.ui.BlurredFont;
 import dev.blurredclient.mod.bridge.CapeEntry;
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import dev.blurredclient.mod.cosmetic.CapeManager;
 import dev.blurredclient.mod.ui.OceanUi;
 import net.minecraft.client.MinecraftClient;
@@ -73,11 +74,10 @@ public class CosmeticsScreen extends Screen {
                 .build());
 
         this.addDrawableChild(ButtonWidget.builder(
-                        BlurredFont.of(BlurredConfig.get().showCapes ? "Capes: on" : "Capes: off"),
+                        BlurredFont.of(Modules.CAPES.isEnabled() ? "Capes: on" : "Capes: off"),
                         b -> {
-                            BlurredConfig cfg = BlurredConfig.get();
-                            cfg.showCapes = !cfg.showCapes;
-                            cfg.save();
+                            Modules.CAPES.toggle();
+                            BlurredConfig.save();
                             this.clearAndInit();
                         })
                 .dimensions(this.width / 2 - 50, this.height - 52, 100, 20)
@@ -157,13 +157,13 @@ public class CosmeticsScreen extends Screen {
             // launcher's Cosmetics tab where it costs nothing.
             boolean registered = worn && CapeManager.capeFor(bridge.nick()) != null;
             ctx.fill(panelX + 6, y + 6, panelX + 18, y + 18,
-                    worn ? Theme.ACCENT : 0xFF2A4756);
+                    worn ? Theme.accent() : 0xFF2A4756);
             if (registered) {
                 ctx.fill(panelX + 9, y + 11, panelX + 15, y + 13, 0x66041824);
             }
 
             ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of(cape.name()),
-                    panelX + 26, y + 8, worn ? Theme.ACCENT : Theme.TEXT);
+                    panelX + 26, y + 8, worn ? Theme.accent() : Theme.TEXT);
 
             y += 26;
         }

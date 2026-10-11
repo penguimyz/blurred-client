@@ -7,8 +7,7 @@
 
   Useful tasks this gives you:
     ./gradlew "Set active project to 1.21.1"   switch the working tree
-    ./gradlew chiseledBuild                    build every version in one pass
-    ./gradlew build                            build only the active version
+    ./gradlew build                            build every version in one pass
 */
 plugins {
     id 'dev.kikugie.stonecutter'

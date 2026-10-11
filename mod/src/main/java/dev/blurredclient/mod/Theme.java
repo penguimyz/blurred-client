@@ -23,9 +23,18 @@ public final class Theme {
     public static final int TEXT_DIM = 0xFFA8CEDC;
     public static final int TEXT_FAINT = 0xFF6E93A2;
 
-    /** Abyssal panel fill and its lit top edge (the "wet glass" cue). */
-    public static final int PANEL = 0xD00A1A26;
-    public static final int PANEL_RAISED = 0xE0102838;
+    /**
+     * Panel fill and its lit top edge (the "wet glass" cue).
+     *
+     * <p>Deliberately a see-through <em>blue</em> rather than the near-black it
+     * started as. At 0xD0 over #0A1A26 the panels read as opaque charcoal
+     * boxes sitting on top of the game; the point of the theme is glass you can
+     * see the world through. The alpha matches the launcher's own
+     * {@code --glass-bg} (0.62), so a panel in game and a card in the launcher
+     * have the same weight.
+     */
+    public static final int PANEL = 0x9E10384F;
+    public static final int PANEL_RAISED = 0xB2164B66;
     public static final int PANEL_EDGE = 0x407DE2F0;
 
     public static final int SUCCESS = 0xFF45E6A8;
@@ -44,4 +53,33 @@ public final class Theme {
         int a = Math.round(Math.max(0f, Math.min(1f, alpha)) * 255f);
         return (a << 24) | (color & 0x00FFFFFF);
     }
+
+    /** The accent, or the RGB colour of the moment when RGB mode is on. */
+    public static int accent() {
+        return chroma(ACCENT, 0f);
+    }
+
+    public static int accentGlow() {
+        return (0x40 << 24) | (accent() & 0xFFFFFF);
+    }
+
+    public static int chroma(int base) {
+        return chroma(base, 0f);
+    }
+
+    /**
+     * {@code base} as is, or — with Appearance → RGB mode on — a colour that
+     * cycles through the rainbow, keeping {@code base}'s alpha. {@code offset}
+     * (0..1) shifts the hue, so rows or segments can form a wave.
+     */
+    public static int chroma(int base, float offset) {
+        var look = dev.blurredclient.mod.module.Modules.APPEARANCE;
+        // Null while the module registry is still being built.
+        if (look == null || !look.rgb()) {
+            return base;
+        }
+        float hue = (float) ((System.nanoTime() / 1e9 * look.rgbSpeed() * 0.15 + offset) % 1.0);
+        return (base & 0xFF000000) | (dev.blurredclient.mod.ui.Colors.hsv(hue, 0.62f, 1f) & 0xFFFFFF);
+    }
+
 }

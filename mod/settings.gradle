@@ -23,10 +23,32 @@ plugins {
   `versions/<version>/gradle.properties` with its yarn + fabric-api
   coordinates — mappings are version-locked, so those cannot be derived.
 
-  Ceiling: **1.21.11**. Fabric's yarn mappings stop there; the 26.x releases have
-  none published at all, so targeting them would mean moving the whole build to
-  Mojang official mappings, which renames every symbol in the source. That's a
-  different project, not another entry in this list.
+  Ceiling: **1.21.11**, and it is not ours to raise.
+
+  Minecraft 26.1 and 26.2 are released and stable, but Fabric has published
+  nothing for them — no yarn, and more importantly no *intermediary*. Loader
+  remaps every mod to intermediary at runtime, so without it there is no Fabric
+  on 26.x at all; this isn't a case where switching the source to Mojang
+  official mappings would rescue the build.
+
+  Re-check before assuming it's still true (verified 2026-08-07):
+
+    curl -s https://maven.fabricmc.net/net/fabricmc/intermediary/maven-metadata.xml | grep 26.
+    curl -s https://maven.fabricmc.net/net/fabricmc/yarn/maven-metadata.xml       | grep 26.
+
+  Note that https://meta.fabricmc.net/v2/versions/game lists 26.x — that list
+  mirrors Mojang's manifest and says nothing about Fabric support, and
+  /v2/versions/intermediary/26.2 answers with a placeholder `0.0.0` rather than
+  a 404. Neither is evidence. The maven metadata above is.
+
+  When they do publish, adding a version is two steps and no source changes
+  beyond whatever `//?` branches the new API needs: list it in `versions(...)`
+  below, and create `versions/<version>/gradle.properties` with its
+  `yarn_mappings` and `fabric_version`.
+
+  Until then the launcher degrades correctly on its own: `SUPPORTED_MC` in
+  `commands/companion.rs` gates the install, so a 26.x instance gets no
+  companion jar rather than a jar that crashes it on startup.
 */
 stonecutter {
     create(rootProject) {

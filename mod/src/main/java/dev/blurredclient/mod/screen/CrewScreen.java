@@ -7,6 +7,9 @@ import dev.blurredclient.mod.bridge.ChatLine;
 import dev.blurredclient.mod.bridge.Friend;
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.hud.HudRenderer;
+import dev.blurredclient.mod.social.BlurredUsers;
+import dev.blurredclient.mod.social.ServerPlayers;
+import dev.blurredclient.mod.social.Whispers;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.multiplayer.ConnectScreen;
@@ -45,30 +48,71 @@ import java.util.List;
  *   <li><b>Answer requests.</b> Incoming requests sit under the crew list with
  *       an accept and a decline, so one isn't left hanging for a session
  *       because the launcher is behind a fullscreen game.</li>
+ *   <li><b>Talk to anyone on the server.</b> The PLAYERS tab lists everyone on
+ *       the server you're on, whatever client they run, and messages them
+ *       through the server's own {@code /msg}. See below.</li>
  * </ul>
  *
- * <p>None of this is done here: every action is a line to
- * {@link LauncherBridge}, and the launcher owns the handshake and the roster.
- * The screen is a view plus a set of buttons, which is why it needs no
- * credentials and has no network code.
+ * <p>Crew actions are all a line to {@link LauncherBridge}, and the launcher
+ * owns the handshake and the roster — which is why this screen needs no
+ * credentials for them.
+ *
+ * <h2>The two rosters, and why there are two</h2>
+ *
+ * CREW is the launcher's: people whose Blurred launcher is in our lobby. It's
+ * the list that can do the good things — presence, one-click join, chat that
+ * follows you between servers.
+ *
+ * <p>PLAYERS is the server's tab list. It contains the Essential user standing
+ * next to you and the vanilla player who has never heard of either client, and
+ * it is the only roster that can. Essential publishes no API, so there is no
+ * way to see their friends or put a message into their client; what both
+ * clients do share is the server, so messages to those players go out as
+ * {@code /msg} (see {@link Whispers}) and crew requests go out as a request
+ * plus a whisper explaining it. Blurred users in that list are marked with the
+ * porthole, so it's obvious who you get the good version with.
  */
 public class CrewScreen extends Screen {
     private static final int SIDEBAR_W = 150;
     private static final int GAP = 8;
     /** Top of the two columns, below the header bar. */
     private static final int BODY_Y = 40;
-    /** Where the sidebar's own heading sits, inside its panel. */
-    private static final int SIDEBAR_HEADING_Y = 50;
-    /** First row of names, clear of the heading. */
-    private static final int LIST_Y = 64;
+    /**
+     * The CREW / PLAYERS tab strip, inside the sidebar panel. It replaced a
+     * static "CREW" caption, which is why it sits where a heading would.
+     */
+    private static final int TABS_Y = 46;
+    private static final int TAB_H = 16;
+    /** First row of names, clear of the tab strip. */
+    private static final int LIST_Y = 68;
     private static final int ROW_H = 18;
     private static final int ROW_STEP = 21;
+
+    /** Which roster the sidebar is showing. */
+    private enum Tab {
+        /** The launcher's crew: Blurred users, with presence and join. */
+        CREW,
+        /** The server's tab list: everyone here, whatever client they run. */
+        PLAYERS
+    }
 
     private TextFieldWidget input;
     private TextFieldWidget nickField;
     private int scroll;
+    private Tab tab = Tab.CREW;
     /** Which conversation the composer sends to. */
     private String target = "";
+    /**
+     * Whether {@link #target} is a player on this server rather than a crew
+     * member or channel.
+     *
+     * <p>This is what routes a message: the same name can mean both — someone
+     * in your crew is often also standing next to you — and the two go to
+     * completely different places. Crew chat reaches them wherever they are;
+     * {@code /msg} only works while you're both on this server, but works
+     * whatever client they run.
+     */
+    private boolean targetIsPlayer;
 
     /**
      * Field contents survive the re-layout that a roster change triggers —
@@ -87,6 +131,11 @@ public class CrewScreen extends Screen {
 
     /** One sidebar row: a crew member, or a request awaiting an answer. */
     private record Slot(Friend friend, int y, boolean request) {}
+
+    /** One row of the PLAYERS tab. */
+    private record PlayerSlot(String name, int y, boolean blurred) {}
+
+    private final List<PlayerSlot> playerSlots = new ArrayList<>();
 
     public CrewScreen() {
         super(BlurredFont.of("Crew"));
@@ -132,11 +181,52 @@ public class CrewScreen extends Screen {
     // Sidebar
     // ------------------------------------------------------------------
 
-    /** Crew rows, then requests, then the add-crew field along the bottom. */
+    /**
+     * The tab strip, then whichever roster is selected.
+     *
+     * <p>The strip is always drawn, including in singleplayer where PLAYERS is
+     * empty — a control that appears and disappears with the world is harder to
+     * learn than one that's simply empty sometimes.
+     */
     private void buildSidebar(LauncherBridge bridge) {
         slots.clear();
+        playerSlots.clear();
         requestsY = -1;
+        // Only the crew tab has an add-by-name field. Cleared rather than left
+        // pointing at the previous tab's widget, which is no longer a child of
+        // this screen and would draw over the player list if rendered.
+        this.nickField = null;
 
+        int left = GAP + 4;
+        int rowW = SIDEBAR_W - 8;
+        int tabW = (rowW - 2) / 2;
+
+        this.addDrawableChild(ButtonWidget.builder(BlurredFont.of("Crew"), b -> switchTab(Tab.CREW))
+                .dimensions(left, TABS_Y, tabW, TAB_H)
+                .tooltip(Tooltip.of(BlurredFont.of("Your Blurred crew — presence, chat and one-click join")))
+                .build());
+        this.addDrawableChild(ButtonWidget.builder(BlurredFont.of("Here"), b -> switchTab(Tab.PLAYERS))
+                .dimensions(left + tabW + 2, TABS_Y, rowW - tabW - 2, TAB_H)
+                .tooltip(Tooltip.of(BlurredFont.of(
+                        "Everyone on this server, whatever client they run — message them or add them")))
+                .build());
+
+        if (tab == Tab.PLAYERS) {
+            buildPlayerList();
+        } else {
+            buildCrewList(bridge);
+        }
+    }
+
+    private void switchTab(Tab next) {
+        if (tab != next) {
+            tab = next;
+            this.clearAndInit();
+        }
+    }
+
+    /** Crew rows, then requests, then the add-crew field along the bottom. */
+    private void buildCrewList(LauncherBridge bridge) {
         int left = GAP + 4;
         int rowW = SIDEBAR_W - 8;
         int addY = addRowY();
@@ -157,6 +247,7 @@ public class CrewScreen extends Screen {
                             BlurredFont.of(f.nick()),
                             b -> {
                                 target = friend.nick();
+                                targetIsPlayer = false;
                                 rebuildPlaceholder();
                             })
                     .dimensions(left, y, nameW, ROW_H)
@@ -226,6 +317,72 @@ public class CrewScreen extends Screen {
                 .build());
     }
 
+    /**
+     * Everyone on this server: click to message, ✚ to add to your crew.
+     *
+     * <p>The add button does two things at once, and both are needed. The crew
+     * request is what a Blurred user accepts with a click; the whisper is what
+     * tells everyone else that a request exists at all, since nothing in their
+     * client is going to mention it. Sending only one of the two leaves either
+     * a request nobody hears about or a message with nothing behind it.
+     */
+    private void buildPlayerList() {
+        if (this.client == null) {
+            return;
+        }
+
+        int left = GAP + 4;
+        int rowW = SIDEBAR_W - 8;
+        int listBottom = this.height - GAP - 6;
+
+        int y = LIST_Y;
+        for (String name : ServerPlayers.others(this.client)) {
+            if (y + ROW_H > listBottom) {
+                break;
+            }
+            boolean blurred = BlurredUsers.isBlurredUser(name);
+            playerSlots.add(new PlayerSlot(name, y, blurred));
+
+            final String player = name;
+            this.addDrawableChild(ButtonWidget.builder(
+                            BlurredFont.of(name),
+                            b -> {
+                                target = player;
+                                targetIsPlayer = true;
+                                rebuildPlaceholder();
+                            })
+                    .dimensions(left, y, rowW - 20, ROW_H)
+                    .tooltip(Tooltip.of(BlurredFont.of(
+                            blurred
+                                    ? name + " is on Blurred — click to message them here"
+                                    : "Click to message " + name + " through the server")))
+                    .build());
+
+            this.addDrawableChild(ButtonWidget.builder(
+                            BlurredFont.of("✚"), b -> addPlayerToCrew(player))
+                    .dimensions(left + rowW - 18, y, 18, ROW_H)
+                    .tooltip(Tooltip.of(BlurredFont.of("Add " + name + " to your crew")))
+                    .build());
+
+            y += ROW_STEP;
+        }
+    }
+
+    /**
+     * Send a crew request, and tell them about it in a way they'll see.
+     *
+     * <p>See {@link Whispers#sendCrewInvite}. The whisper is skipped for players
+     * we already know are on Blurred: their client shows the request properly,
+     * so a whisper about it would just be noise.
+     */
+    private void addPlayerToCrew(String player) {
+        LauncherBridge bridge = LauncherBridge.get();
+        bridge.addFriend(player, "");
+        if (this.client != null && !BlurredUsers.isBlurredUser(player)) {
+            Whispers.sendCrewInvite(this.client, player, bridge.nick());
+        }
+    }
+
     private int addRowY() {
         return this.height - GAP - 26;
     }
@@ -240,8 +397,19 @@ public class CrewScreen extends Screen {
      * the drawn rows from disagreeing, which is the classic way a list like
      * this ends up with a click landing on the wrong person.
      */
-    private static String rosterKey(LauncherBridge bridge) {
+    private String rosterKey(LauncherBridge bridge) {
         StringBuilder sb = new StringBuilder();
+        sb.append(tab).append('|');
+        if (tab == Tab.PLAYERS) {
+            // The server's roster moves the same way the crew's does — someone
+            // joins, someone leaves — and drives the same widget rebuild.
+            if (this.client != null) {
+                for (String name : ServerPlayers.others(this.client)) {
+                    sb.append(name).append(BlurredUsers.isBlurredUser(name)).append('|');
+                }
+            }
+            return sb.toString();
+        }
         for (Friend f : bridge.crew()) {
             sb.append(f.nick()).append(f.online()).append(f.server()).append('|');
         }
@@ -267,7 +435,8 @@ public class CrewScreen extends Screen {
 
     private void rebuildPlaceholder() {
         if (this.input != null) {
-            this.input.setPlaceholder(BlurredFont.of("Message " + target));
+            this.input.setPlaceholder(BlurredFont.of(
+                    (targetIsPlayer ? "Whisper " : "Message ") + target));
         }
     }
 
@@ -286,12 +455,26 @@ public class CrewScreen extends Screen {
                 null);
     }
 
+    /**
+     * Send whatever's typed, down whichever pipe the target needs.
+     *
+     * <p>A player from the PLAYERS tab goes out as a server whisper; a crew
+     * member or channel goes to the launcher. Neither is a fallback for the
+     * other — see {@link #targetIsPlayer}.
+     */
     private void submit() {
         String text = this.input.getText().trim();
         if (text.isEmpty() || target.isEmpty()) {
             return;
         }
-        LauncherBridge.get().send(target, text);
+
+        if (targetIsPlayer) {
+            if (this.client == null || !Whispers.send(this.client, target, text)) {
+                return;
+            }
+        } else {
+            LauncherBridge.get().send(target, text);
+        }
         this.input.setText("");
     }
 
@@ -376,10 +559,19 @@ public class CrewScreen extends Screen {
 
         // Sidebar
         OceanUi.panel(ctx, GAP, BODY_Y, SIDEBAR_W, this.height - BODY_Y - GAP, false);
-        ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of("CREW"),
-                GAP + 6, SIDEBAR_HEADING_Y, Theme.TEXT_FAINT);
 
-        if (bridge.crew().isEmpty()) {
+        // Empty-state lines. Each says what would fill the list rather than
+        // just that it's empty — "no players" on a screen you reached from
+        // singleplayer tells you nothing you didn't know.
+        if (tab == Tab.PLAYERS) {
+            if (this.client != null && !ServerPlayers.onServer(this.client)) {
+                ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of("Not on a server"),
+                        GAP + 6, LIST_Y + 4, Theme.TEXT_FAINT);
+            } else if (playerSlots.isEmpty()) {
+                ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of("Nobody else here"),
+                        GAP + 6, LIST_Y + 4, Theme.TEXT_FAINT);
+            }
+        } else if (bridge.crew().isEmpty()) {
             ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of("No crew yet"),
                     GAP + 6, LIST_Y + 4, Theme.TEXT_FAINT);
         }
@@ -407,13 +599,13 @@ public class CrewScreen extends Screen {
         OceanUi.panel(ctx, GAP, GAP, this.width - GAP * 2, 26, false);
         HudRenderer.porthole(ctx, GAP + 16, GAP + 13, 6);
         ctx.drawTextWithShadow(this.textRenderer, BlurredFont.of("BLURRED"),
-                GAP + 28, GAP + 9, Theme.ACCENT);
+                GAP + 28, GAP + 9, Theme.accent());
 
         Text conversation = BlurredFont.of(target.isEmpty() ? "No conversation" : target);
         int conversationW = this.textRenderer.getWidth(conversation);
         int conversationX = this.width - GAP - 6 - conversationW;
         ctx.drawTextWithShadow(this.textRenderer, conversation, conversationX, GAP + 9,
-                target.isEmpty() ? Theme.TEXT_FAINT : Theme.ACCENT);
+                target.isEmpty() ? Theme.TEXT_FAINT : Theme.accent());
 
         String status = !bridge.isLauncherReachable()
                 ? "Launcher offline — start Blurred Client for crew and chat"
@@ -451,13 +643,24 @@ public class CrewScreen extends Screen {
             }
         }
 
+        // The porthole marks who in the server list is also on Blurred — i.e.
+        // who you get presence and cross-server chat with, rather than only a
+        // whisper that stops working when one of you leaves.
+        for (PlayerSlot slot : playerSlots) {
+            if (slot.blurred()) {
+                HudRenderer.porthole(ctx, GAP + 10, slot.y() + 9, 3);
+            }
+        }
+
         int chatX = SIDEBAR_W + GAP * 2;
         renderTranscript(ctx, bridge, chatX, this.width - chatX - GAP);
 
         // Added with addSelectableChild, not addDrawableChild, so they aren't
         // in the list super just rendered.
         this.input.render(ctx, mouseX, mouseY, delta);
-        this.nickField.render(ctx, mouseX, mouseY, delta);
+        if (this.nickField != null) {
+            this.nickField.render(ctx, mouseX, mouseY, delta);
+        }
     }
 
     /**
@@ -466,6 +669,11 @@ public class CrewScreen extends Screen {
      * the launcher's transcript follows.
      */
     private void renderTranscript(DrawContext ctx, LauncherBridge bridge, int chatX, int chatW) {
+        if (targetIsPlayer) {
+            renderWhisperThread(ctx, chatX, chatW);
+            return;
+        }
+
         List<ChatLine> all = bridge.messages();
         int lineH = this.textRenderer.fontHeight + 2;
         int bottom = this.height - 40;
@@ -488,7 +696,7 @@ public class CrewScreen extends Screen {
                     : "<" + m.from() + "> " + m.text();
             int color = m.isSystem()
                     ? Theme.TEXT_FAINT
-                    : m.mine() ? Theme.ACCENT : Theme.TEXT;
+                    : m.mine() ? Theme.accent() : Theme.TEXT;
 
             // Wrap long lines rather than clipping them.
             List<net.minecraft.text.OrderedText> wrapped =
@@ -503,6 +711,49 @@ public class CrewScreen extends Screen {
         if (shown == 0) {
             ctx.drawTextWithShadow(this.textRenderer,
                     BlurredFont.of("Nothing here yet."), chatX + 6, top, Theme.TEXT_FAINT);
+        }
+    }
+
+    /**
+     * The outgoing half of a whisper conversation, plus a note saying so.
+     *
+     * <p>Only our own lines appear, and the panel says as much rather than
+     * looking like a chat window that's mysteriously one-sided. Their replies
+     * land in the game's chat box — see {@link Whispers} for why capturing them
+     * would produce a transcript with holes in it, which is the one thing worse
+     * than sending you to the chat box.
+     */
+    private void renderWhisperThread(DrawContext ctx, int chatX, int chatW) {
+        int lineH = this.textRenderer.fontHeight + 2;
+        int top = BODY_Y + 6;
+        int y = this.height - 40 - lineH;
+
+        // The footnote is pinned to the bottom, under the messages, because
+        // that's where the eye lands after reading what it just sent.
+        String hint = BlurredUsers.isBlurredUser(target)
+                ? target + " is on Blurred — add them as crew for chat that follows you both."
+                : "Sent through the server as /msg. " + target + "'s reply arrives in your chat box.";
+        for (var line : this.textRenderer.wrapLines(BlurredFont.of(hint), chatW - 12)) {
+            ctx.drawTextWithShadow(this.textRenderer, line, chatX + 6, y, Theme.TEXT_FAINT);
+            y -= lineH;
+        }
+        y -= 4;
+
+        List<String> sent = Whispers.sentTo(target);
+        if (sent.isEmpty()) {
+            ctx.drawTextWithShadow(this.textRenderer,
+                    BlurredFont.of("Nothing sent to " + target + " yet."),
+                    chatX + 6, top, Theme.TEXT_FAINT);
+            return;
+        }
+
+        for (int i = sent.size() - 1; i >= 0 && y >= top; i--) {
+            List<net.minecraft.text.OrderedText> wrapped =
+                    this.textRenderer.wrapLines(BlurredFont.of("→ " + sent.get(i)), chatW - 12);
+            for (int w = wrapped.size() - 1; w >= 0 && y >= top; w--) {
+                ctx.drawTextWithShadow(this.textRenderer, wrapped.get(w), chatX + 6, y, Theme.ACCENT);
+                y -= lineH;
+            }
         }
     }
 

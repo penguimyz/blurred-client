@@ -43,7 +43,8 @@ public final class CapeManager {
      * Record a cape for a player. Safe to call from any thread; the texture is
      * uploaded lazily on the render thread.
      *
-     * @param base64Png a 64x32 (or 64x64) cape sheet, base64-encoded, or null
+     * @param base64Png a 64x32 or 64x64 cape sheet — or any whole multiple of
+     *                  one, for a higher-resolution cape — base64-encoded, or null
      *                  to clear the player's cape
      */
     public static void put(String username, String base64Png) {
@@ -112,6 +113,90 @@ public final class CapeManager {
         return id;
     }
 
+    /**
+     * Is this a cape sheet we can render?
+     *
+     * <p>The base layouts are 64x32 (the classic sheet) and 64x64 (the square
+     * one), and any whole multiple of either is also fine — a 128x64 sheet is a
+     * 64x32 cape at double resolution, 256x128 at quadruple.
+     *
+     * <p>That works because nothing about cape rendering is measured in texels.
+     * The model's UVs are fractions of the texture, so a bigger sheet maps onto
+     * exactly the same rectangles and is simply sampled more finely. The old
+     * exact-match check wasn't protecting anything real; it just capped every
+     * cape at ten pixels across, which for a canvas people are trying to draw
+     * on is the entire limitation.
+     *
+     * <p>Non-multiples are still refused. A 100x50 image is not a cape at some
+     * odd scale, it's something that isn't a cape, and stretching it over the
+     * model produces garbage.
+     *
+     * <p>The ceiling is a memory guard, not a rendering one: capes arrive from
+     * other players over the network, and 16x is already a 1024x512 texture.
+     */
+    static boolean isCapeSheet(int width, int height) {
+        if (width <= 0 || width % 64 != 0) {
+            return false;
+        }
+        int scale = width / 64;
+        if (scale > MAX_CAPE_SCALE) {
+            return false;
+        }
+        return height == 32 * scale || height == 64 * scale;
+    }
+
+    /** Largest sheet multiple accepted, i.e. up to 1024x512. */
+    private static final int MAX_CAPE_SCALE = 16;
+
+
+    /**
+     * Cape sheets whose elytra half is actually painted, by lowercased name.
+     *
+     * <p>Computed once at upload rather than per frame — it's a scan of a few
+     * thousand pixels, and the answer can't change while a texture is loaded.
+     */
+    private static final Map<String, Boolean> HAS_ELYTRA = new ConcurrentHashMap<>();
+
+    /**
+     * Does this cape include elytra wings?
+     *
+     * <p>A cape sheet is two designs side by side: the cape's own box occupies
+     * x 0..21, and the elytra wings live from x=22 onward. Mojang's capes paint
+     * both; ours paint only the cape, because that's all the editor offers.
+     *
+     * <p>This matters because of what the game does with a cape when you put an
+     * elytra on: it renders the elytra <em>from the cape texture</em>. Point it
+     * at a sheet whose right half is empty and the wings come out fully
+     * transparent — the elytra vanishes off your back. So the override is
+     * applied only when there's something there to draw.
+     */
+    public static boolean hasElytraArt(String username) {
+        return username != null
+                && Boolean.TRUE.equals(HAS_ELYTRA.get(username.toLowerCase(Locale.ROOT)));
+    }
+
+    /**
+     * Scan the elytra half for any pixel that isn't fully transparent.
+     *
+     * <p>The boundary scales with the sheet: a 2x cape is 128 wide and its
+     * elytra half starts at 44, not 22.
+     */
+    private static boolean scanForElytra(NativeImage image) {
+        int scale = Math.max(1, image.getWidth() / 64);
+        int startX = 22 * scale;
+        int endY = Math.min(image.getHeight(), 21 * scale);
+
+        for (int y = 0; y < endY; y++) {
+            for (int x = startX; x < image.getWidth(); x++) {
+                // Alpha only — a zero here is a pixel that draws nothing.
+                if (image.getOpacity(x, y) != 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static Identifier upload(String key, String base64Png) {
         try {
             byte[] bytes = Base64.getDecoder().decode(base64Png);
@@ -120,15 +205,15 @@ public final class CapeManager {
                 image = NativeImage.read(in);
             }
 
-            // Cape sheets are 64x32 (legacy) or 64x64. Anything else isn't a
-            // cape and would render as garbage stretched over the model.
-            if (image.getWidth() != 64 || (image.getHeight() != 32 && image.getHeight() != 64)) {
+            if (!isCapeSheet(image.getWidth(), image.getHeight())) {
                 BlurredMod.LOGGER.warn(
-                        "Ignoring cape for {}: expected a 64x32 or 64x64 sheet, got {}x{}",
+                        "Ignoring cape for {}: expected a 64x32 sheet or a whole multiple of one, got {}x{}",
                         key, image.getWidth(), image.getHeight());
                 image.close();
                 return null;
             }
+
+            HAS_ELYTRA.put(key, scanForElytra(image));
 
             Identifier id = Identifier.of(BlurredMod.MOD_ID, "capes/" + sanitize(key));
             // 1.21.9+ takes a name supplier used as the GL debug label; older

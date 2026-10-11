@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "blurred-gametest",
+  "version": "1.0.0",
+  "name": "Blurred in-game tests",
+  "environment": "client",
+  "entrypoints": {
+    "fabric-client-gametest": ["dev.blurredclient.gametest.BlurredGameTest"]
+  },
+  "depends": { "blurred": "*" }
+}
