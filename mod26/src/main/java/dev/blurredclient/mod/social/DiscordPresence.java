@@ -2,10 +2,6 @@ package dev.blurredclient.mod.social;
 
 import com.google.gson.JsonObject;
 import dev.blurredclient.mod.BlurredMod;
-import dev.blurredclient.mod.config.BlurredConfig;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ServerData;
-
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.net.StandardProtocolFamily;
@@ -18,6 +14,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ServerData;
 
 /**
  * "Blurred Client — On a server" on your Discord profile.
@@ -102,8 +100,8 @@ public final class DiscordPresence {
      * worker, so the tick cost doesn't depend on whether Discord is running.
      */
     public static void update(Minecraft client) {
-        BlurredConfig cfg = BlurredConfig.get();
-        if (!cfg.discordEnabled || cfg.discordAppId().isEmpty()) {
+        var discord = dev.blurredclient.mod.module.Modules.DISCORD;
+        if (!discord.isActive() || discord.appId().isEmpty()) {
             return;
         }
 
@@ -122,7 +120,7 @@ public final class DiscordPresence {
             // deliberate audience than the crew list this mod otherwise shares
             // the address with. So the status says "On a server" and stops
             // there.
-            if (cfg.discordShowServer && entry != null && entry.ip != null) {
+            if (discord.showServer() && entry != null && entry.ip != null) {
                 state = entry.ip;
             }
         }
@@ -178,7 +176,7 @@ public final class DiscordPresence {
     private static void pump(Ipc ipc) throws IOException {
         JsonObject hello = new JsonObject();
         hello.addProperty("v", 1);
-        hello.addProperty("client_id", BlurredConfig.get().discordAppId());
+        hello.addProperty("client_id", dev.blurredclient.mod.module.Modules.DISCORD.appId());
         ipc.send(OP_HANDSHAKE, hello.toString());
         ipc.receive(); // READY, or an error frame if the ID is wrong.
 

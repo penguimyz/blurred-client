@@ -8,7 +8,7 @@ package dev.blurredclient.mod;
  * like the launcher rather than like a generic mod HUD. The CSS is the source
  * of truth; when an accent changes there, change it here.
  *
- * <p>Format is 0xAARRGGBB, which is what {@code GuiGraphicsExtractor} expects.
+ * <p>Format is 0xAARRGGBB, which is what {@code DrawContext} expects.
  */
 public final class Theme {
     private Theme() {}
@@ -53,4 +53,33 @@ public final class Theme {
         int a = Math.round(Math.max(0f, Math.min(1f, alpha)) * 255f);
         return (a << 24) | (color & 0x00FFFFFF);
     }
+
+    /** The accent, or the RGB colour of the moment when RGB mode is on. */
+    public static int accent() {
+        return chroma(ACCENT, 0f);
+    }
+
+    public static int accentGlow() {
+        return (0x40 << 24) | (accent() & 0xFFFFFF);
+    }
+
+    public static int chroma(int base) {
+        return chroma(base, 0f);
+    }
+
+    /**
+     * {@code base} as is, or — with Appearance → RGB mode on — a colour that
+     * cycles through the rainbow, keeping {@code base}'s alpha. {@code offset}
+     * (0..1) shifts the hue, so rows or segments can form a wave.
+     */
+    public static int chroma(int base, float offset) {
+        var look = dev.blurredclient.mod.module.Modules.APPEARANCE;
+        // Null while the module registry is still being built.
+        if (look == null || !look.rgb()) {
+            return base;
+        }
+        float hue = (float) ((System.nanoTime() / 1e9 * look.rgbSpeed() * 0.15 + offset) % 1.0);
+        return (base & 0xFF000000) | (dev.blurredclient.mod.ui.Colors.hsv(hue, 0.62f, 1f) & 0xFFFFFF);
+    }
+
 }

@@ -1,0 +1,18 @@
+{
+  "providers": [
+    {
+      "type": "ttf",
+      "file": "blurred:varela_round.ttf",
+      "shift": [
+        0,
+        1.5
+      ],
+      "size": 8.0,
+      "oversample": 6.0
+    },
+    {
+      "type": "reference",
+      "id": "minecraft:default"
+    }
+  ]
+}

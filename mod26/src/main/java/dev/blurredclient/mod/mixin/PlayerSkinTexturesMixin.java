@@ -1,107 +1,120 @@
 package dev.blurredclient.mod.mixin;
 
-import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import dev.blurredclient.mod.cosmetic.CapeManager;
-import net.minecraft.client.player.AbstractClientPlayer;
-import net.minecraft.core.ClientAsset;
-import net.minecraft.resources.Identifier;
-import net.minecraft.world.entity.player.PlayerSkin;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
-
 import java.util.Optional;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.core.ClientAsset;
+import net.minecraft.resources.Identifier;
+import net.minecraft.world.entity.player.PlayerSkin;
 
 /**
  * Swaps in a Blurred cape for any player who has one.
  *
- * <p>Hooks the skin accessor rather than the cape renderer: {@link PlayerSkin}
- * is the single source every renderer reads from, so patching it here means the
- * cape shows up in the world, in the inventory preview and on the elytra
- * without touching three separate render paths.
+ * <p>This hooks the skin accessor rather than the cape renderer itself, and
+ * that choice matters: {@code SkinTextures} is the single source every renderer
+ * reads from, so patching it here means the cape shows up in the world, in the
+ * inventory preview, on the elytra slot and anywhere else the game draws a
+ * player — one injection instead of one per render path.
  *
- * <p>A player without a Blurred cape falls through untouched, which is what
- * keeps ordinary Mojang capes working.
+ * <p>This is the file that drifts most across versions, which is why the whole
+ * injection is branched rather than patched piecemeal:
  *
- * <h2>What 26.x changed</h2>
+ * <ul>
+ *   <li><b>1.21.9+</b> — the method is {@code getSkin}, {@code SkinTextures}
+ *       lives in {@code net.minecraft.entity.player} and its components are
+ *       {@code AssetInfo.TextureAsset} rather than raw identifiers. It also
+ *       gained {@code withOverride}, which is the game's own supported way to
+ *       layer a replacement texture over a resolved skin — better than
+ *       rebuilding the record, because it keeps working when the record gains
+ *       fields.</li>
+ *   <li><b>Older</b> — the method is {@code getSkinTextures},
+ *       {@code SkinTextures} lives in {@code net.minecraft.client.util} and is a
+ *       six-component record of plain identifiers, so the only option is to
+ *       rebuild it by hand.</li>
+ * </ul>
  *
- * The type is now {@code PlayerSkin} (a record of {@code ClientAsset.Texture}s)
- * rather than {@code SkinTextures}, and the partial-update helper is
- * {@link PlayerSkin.Patch} rather than {@code SkinOverride}. The shape is the
- * same — a set of optionals layered over the existing skin — so the logic below
- * is unchanged from the 1.21.x build; only the names and the asset wrapper
- * moved.
+ * <p>A player without a Blurred cape falls through untouched either way, which
+ * is what keeps ordinary Mojang capes working.
  */
 @Mixin(AbstractClientPlayer.class)
 public class PlayerSkinTexturesMixin {
 
-    /**
-     * Vanilla's elytra texture, as the equipment model refers to it.
-     *
-     * <p>{@code assets/minecraft/equipment/elytra.json} declares the wings
-     * layer as {@code minecraft:elytra} with {@code use_player_texture: true},
-     * which resolves to this path.
-     */
-    private static final ClientAsset.ResourceTexture VANILLA_ELYTRA =
-            new ClientAsset.ResourceTexture(
-                    Identifier.fromNamespaceAndPath("minecraft", "elytra"),
-                    Identifier.fromNamespaceAndPath(
-                            "minecraft", "textures/entity/equipment/wings/elytra.png"));
-
     @Inject(method = "getSkin", at = @At("RETURN"), cancellable = true)
     private void blurred$applyCape(CallbackInfoReturnable<PlayerSkin> cir) {
-        AbstractClientPlayer self = (AbstractClientPlayer) (Object) this;
         Identifier cape = blurred$capeForSelf();
         if (cape == null) {
             return;
         }
-
-        // Both id and texturePath, pointing at the same thing — and the
-        // two-argument constructor specifically.
-        //
-        // `ResourceTexture` holds an id *and* a texture path, and the one-arg
-        // constructor derives the second from the first with
-        // `Identifier.withPath(...)`, i.e. it assumes a file inside a resource
-        // pack. Ours isn't one: CapeManager registers the decoded PNG straight
-        // into the TextureManager under this exact id, so a derived path points
-        // at a file that has never existed and the cape renders as the missing
-        // texture. Passing both explicitly is what the 1.21.x build does, for
-        // the same reason.
+        // Both id and texturePath point at our registered texture: the renderer
+        // reads texturePath(), and matching id() keeps the asset consistent for
+        // anything that inspects it.
         ClientAsset.ResourceTexture asset = new ClientAsset.ResourceTexture(cape, cape);
-
-        // The elytra needs saying explicitly, and leaving it empty is NOT
-        // enough. WingsLayer picks its texture like this:
-        //
-        //     if (skin.elytra() != null) use skin.elytra()
-        //     if (skin.cape()   != null) use skin.cape()      <-- falls through
-        //
-        // so setting a cape silently drags the wings onto the cape sheet too.
-        // That's right for a Mojang cape, whose sheet paints wings at x>=22,
-        // and wrong for ours, which leave that half transparent — the elytra
-        // renders fully see-through and appears to vanish off your back.
-        //
-        // So when our cape has no wings on it we pin the elytra to vanilla's
-        // own texture, which is what the player would have seen anyway.
-        String name = self.getGameProfile().name();
-        Optional<ClientAsset.ResourceTexture> elytra = CapeManager.hasElytraArt(name)
-                ? Optional.of(asset)
-                : Optional.of(VANILLA_ELYTRA);
-
         cir.setReturnValue(cir.getReturnValue().with(PlayerSkin.Patch.create(
-                Optional.empty(),    // body — leave the player's own skin
-                Optional.of(asset),  // cape
-                elytra,
+                Optional.empty(),   // body — leave the player's own skin
+                Optional.of(asset), // cape
+                Optional.of(blurred$capeHasElytra() ? asset : blurred$vanillaElytra()),
                 Optional.empty()))); // model — leave classic/slim alone
     }
 
-    /** The cape for the player this mixin is applied to, or null. */
+    /**
+     * Vanilla's own elytra texture.
+     *
+     * <p>The path moved when the equipment model system landed: it's
+     * {@code textures/entity/elytra.png} up to 1.21.1 and
+     * {@code textures/entity/equipment/wings/elytra.png} from 1.21.4 on.
+     */
+    private static final Identifier BLURRED$VANILLA_ELYTRA =
+            Identifier.withDefaultNamespace("textures/entity/equipment/wings/elytra.png");
+
+    /** The vanilla elytra, wrapped as the asset the newer API expects. */
+    private ClientAsset.ResourceTexture blurred$vanillaElytra() {
+        return new ClientAsset.ResourceTexture(BLURRED$VANILLA_ELYTRA, BLURRED$VANILLA_ELYTRA);
+    }
+
+    /**
+     * Should this cape take over the elytra too?
+     *
+     * <p>Only when its sheet actually has wings painted on it. Wearing an
+     * elytra makes the game render it <em>from the cape texture</em>, so
+     * pointing it at a sheet whose elytra half is blank draws fully
+     * transparent wings — the elytra disappears off your back. See
+     * {@link CapeManager#hasElytraArt}.
+     *
+     * <p>A boolean rather than the override itself, because the type that
+     * override is expressed in differs between versions and this doesn't.
+     */
+    private boolean blurred$capeHasElytra() {
+        return CapeManager.hasElytraArt(blurred$selfName());
+    }
+
+    /**
+     * The cape for the player this mixin is applied to, or null.
+     *
+     * <p>Shared by both branches so the config check, the name lookup and the
+     * null handling exist once — only the record shuffling above is
+     * version-specific.
+     */
     private Identifier blurred$capeForSelf() {
-        if (!BlurredConfig.get().showCapes) {
+        if (!Modules.CAPES.isActive()) {
             return null;
         }
-        AbstractClientPlayer self = (AbstractClientPlayer) (Object) this;
-        String name = self.getGameProfile().name();
+        String name = blurred$selfName();
         return name == null ? null : CapeManager.capeFor(name);
+    }
+
+    /**
+     * This player's account name.
+     *
+     * <p>Mojang's {@code GameProfile} became a record in the authlib that ships
+     * with 1.21.9, so the accessor lost its {@code get} prefix.
+     */
+    private String blurred$selfName() {
+        AbstractClientPlayer self = (AbstractClientPlayer) (Object) this;
+        return self.getGameProfile().name();
     }
 }

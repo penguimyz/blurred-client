@@ -5,15 +5,14 @@ import dev.blurredclient.mod.ui.BlurredFont;
 import dev.blurredclient.mod.bridge.CapeEntry;
 import dev.blurredclient.mod.bridge.LauncherBridge;
 import dev.blurredclient.mod.config.BlurredConfig;
+import dev.blurredclient.mod.module.Modules;
 import dev.blurredclient.mod.cosmetic.CapeManager;
 import dev.blurredclient.mod.ui.OceanUi;
+import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.network.chat.Component;
-
-import java.util.List;
+import net.minecraft.client.gui.screens.Screen;
 
 /**
  * In-game cosmetics: pick a cape without alt-tabbing to the launcher.
@@ -73,11 +72,10 @@ public class CosmeticsScreen extends Screen {
                 .build());
 
         this.addRenderableWidget(Button.builder(
-                        BlurredFont.of(BlurredConfig.get().showCapes ? "Capes: on" : "Capes: off"),
+                        BlurredFont.of(Modules.CAPES.isEnabled() ? "Capes: on" : "Capes: off"),
                         b -> {
-                            BlurredConfig cfg = BlurredConfig.get();
-                            cfg.showCapes = !cfg.showCapes;
-                            cfg.save();
+                            Modules.CAPES.toggle();
+                            BlurredConfig.save();
                             this.rebuildWidgets();
                         })
                 .bounds(this.width / 2 - 50, this.height - 52, 100, 20)
@@ -102,7 +100,7 @@ public class CosmeticsScreen extends Screen {
 
     /**
      * Everything is drawn here rather than in {@link #render} for the same
-     * reason as {@link CrewScreen}: {@code renderBackground} is called exactly
+     * reason as {@link CrewScreen}: {@code extractBackground} is called exactly
      * once per frame by the framework, and calling it a second time by hand
      * crashes in-game with "Can only blur once per frame". Which side calls it
      * differs between 1.21.1 and 1.21.11, so overriding it is the only
@@ -116,7 +114,7 @@ public class CosmeticsScreen extends Screen {
         int panelX = this.width / 2 - 155;
         int panelW = 310;
 
-        // Header with the mark, so this reads as part of the minecraft.
+        // Header with the mark, so this reads as part of the client.
         int logoW = OceanUi.logoWidth(this.font, 12);
         OceanUi.logo(ctx, this.font, (this.width - logoW) / 2, 14, 12);
         ctx.centeredText(
@@ -157,13 +155,13 @@ public class CosmeticsScreen extends Screen {
             // launcher's Cosmetics tab where it costs nothing.
             boolean registered = worn && CapeManager.capeFor(bridge.nick()) != null;
             ctx.fill(panelX + 6, y + 6, panelX + 18, y + 18,
-                    worn ? Theme.ACCENT : 0xFF2A4756);
+                    worn ? Theme.accent() : 0xFF2A4756);
             if (registered) {
                 ctx.fill(panelX + 9, y + 11, panelX + 15, y + 13, 0x66041824);
             }
 
             ctx.text(this.font, BlurredFont.of(cape.name()),
-                    panelX + 26, y + 8, worn ? Theme.ACCENT : Theme.TEXT);
+                    panelX + 26, y + 8, worn ? Theme.accent() : Theme.TEXT);
 
             y += 26;
         }
@@ -177,12 +175,12 @@ public class CosmeticsScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor ctx, int mouseX, int mouseY, float delta) {
-        // Panels and text are drawn in renderBackground; super draws the widgets.
+        // Panels and text are drawn in extractBackground; super draws the widgets.
         super.extractRenderState(ctx, mouseX, mouseY, delta);
     }
 
     @Override
     public void onClose() {
-        Minecraft.getInstance().setScreenAndShow(parent);
+        Minecraft.getInstance().gui.setScreen(parent);
     }
 }

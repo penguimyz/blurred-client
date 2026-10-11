@@ -1,0 +1,8 @@
+{
+  "pack": {
+    "description": "Blurred world shaders (foliage, wet)",
+    "pack_format": 75,
+    "min_format": 75,
+    "max_format": 75
+  }
+}

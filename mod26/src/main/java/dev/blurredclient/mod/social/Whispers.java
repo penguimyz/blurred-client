@@ -1,14 +1,13 @@
 package dev.blurredclient.mod.social;
 
 import dev.blurredclient.mod.BlurredMod;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientPacketListener;
-
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 
 /**
  * Messaging a player who isn't on Blurred — an Essential user, a vanilla

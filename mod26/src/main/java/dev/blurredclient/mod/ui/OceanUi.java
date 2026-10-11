@@ -129,7 +129,7 @@ public final class OceanUi {
             double r = 1.5d + (i % 3) * 0.9d;
 
             x += (int) (Math.sin(clock * 0.03f + i) * 6);
-            Draw.ring(ctx, x, y, r, 1d, 0x55BDF3FF);
+            Draw.ring(ctx, x, y, (float) r, (float) (r - 1d), 0x55BDF3FF);
         }
     }
 
@@ -169,7 +169,7 @@ public final class OceanUi {
         // look like an object catching light from above.
         int top = !enabled ? 0xB0102631 : hovered ? 0xF02A6E82 : 0xE0154356;
         int bottom = !enabled ? 0xB00A1B24 : hovered ? 0xF01B5163 : 0xE00D2E3D;
-        int edge = !enabled ? 0x50557C8A : hovered ? Theme.ACCENT : 0x9A5FA9BC;
+        int edge = !enabled ? 0x50557C8A : hovered ? Theme.accent() : 0x9A5FA9BC;
 
         int r = rounded ? Math.min(BUTTON_RADIUS, Math.min(w, h) / 2) : 0;
 
@@ -222,8 +222,8 @@ public final class OceanUi {
         // Hover: accent bars sliding in from both ends, like a selected slot.
         // Skipped on narrow buttons, where they'd meet in the middle.
         if (hovered && enabled && w >= 40) {
-            ctx.fill(x + 3, y + h / 2 - 3, x + 5, y + h / 2 + 3, Theme.ACCENT);
-            ctx.fill(x + w - 5, y + h / 2 - 3, x + w - 3, y + h / 2 + 3, Theme.ACCENT);
+            ctx.fill(x + 3, y + h / 2 - 3, x + 5, y + h / 2 + 3, Theme.accent());
+            ctx.fill(x + w - 5, y + h / 2 - 3, x + w - 3, y + h / 2 + 3, Theme.accent());
         }
 
         int textColor = !enabled ? Theme.TEXT_FAINT : hovered ? 0xFFEFFEFF : Theme.TEXT;
@@ -373,7 +373,7 @@ public final class OceanUi {
             int bx = ox - (int) (t * 0.35f) * scale / 2;
             int by = oy + (SUB.length / 2) * scale - (int) (t * 0.5f);
             double r = 1.2d + (i % 2) * 0.8d;
-            Draw.ring(ctx, bx, by, r, 1d, 0x44BDF3FF);
+            Draw.ring(ctx, bx, by, (float) r, (float) (r - 1d), 0x44BDF3FF);
         }
     }
 
@@ -395,18 +395,18 @@ public final class OceanUi {
             }
             int yy = cy + dy;
             if (Math.abs(dy) >= inner) {
-                ctx.fill(cx - outer, yy, cx + outer, yy + 1, Theme.ACCENT);
+                ctx.fill(cx - outer, yy, cx + outer, yy + 1, Theme.accent());
             } else {
                 int in = (int) Math.round(Math.sqrt(Math.max(0, inner * inner - dy * dy)));
-                ctx.fill(cx - outer, yy, cx - in, yy + 1, Theme.ACCENT);
-                ctx.fill(cx + in, yy, cx + outer, yy + 1, Theme.ACCENT);
+                ctx.fill(cx - outer, yy, cx - in, yy + 1, Theme.accent());
+                ctx.fill(cx + in, yy, cx + outer, yy + 1, Theme.accent());
             }
         }
         // Waterline across the glass.
-        ctx.fill(cx - inner + 1, cy, cx + inner - 1, cy + 1, Theme.ACCENT_GLOW);
+        ctx.fill(cx - inner + 1, cy, cx + inner - 1, cy + 1, Theme.accentGlow());
 
         Component word = Component.literal("BLURRED");
-        ctx.text(font, word, x + size + 5, cy - font.lineHeight / 2, Theme.ACCENT);
+        ctx.text(font, word, x + size + 5, cy - font.lineHeight / 2, Theme.accent());
         return size + 5 + font.width(word);
     }
 

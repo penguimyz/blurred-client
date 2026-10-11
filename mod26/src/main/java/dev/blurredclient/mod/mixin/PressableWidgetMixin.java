@@ -2,13 +2,16 @@ package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
+import dev.blurredclient.mod.ui.kit.PixelSkin;
+import dev.blurredclient.mod.ui.kit.Skin;
+import dev.blurredclient.mod.ui.kit.Skins;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.AbstractButton;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ImageButton;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.AbstractButton;
-import net.minecraft.client.gui.components.ImageButton;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -17,7 +20,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Draws vanilla buttons in the ocean style.
  *
- * <p>Targets {@link AbstractButton} rather than {@code Button}: it's the
+ * <p>Targets {@link AbstractButton} rather than {@code ButtonWidget}: it's the
  * shared base for buttons, toggles and most other pressables, so one injection
  * covers nearly every button in the game instead of just the plain ones.
  *
@@ -25,21 +28,21 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * there's no double-render and no dependence on the widget texture atlas — which
  * is also why this survives across Minecraft versions unchanged.
  *
- * <p>{@code renderWidget} is {@code final} in newer versions. That prevents
+ * <p>{@code extractWidgetRenderState} is {@code final} in newer versions. That prevents
  * *overriding* it in a subclass; it does not prevent a mixin injecting into it,
  * because mixins rewrite the method body rather than extend the class.
  *
  * <h2>What it deliberately leaves alone</h2>
  *
  * The reach of this injection is the whole problem with it. Cancelling
- * {@code renderWidget} replaces whatever the widget was going to draw with a
+ * {@code extractWidgetRenderState} replaces whatever the widget was going to draw with a
  * labelled rectangle — which is right for a text button and destructive for
  * anything that draws a picture. Three categories are skipped, and each one is
  * a bug that was reported:
  *
  * <ul>
  *   <li><b>Widgets that aren't plain buttons.</b> A voice-chat mod's mute and
- *       deafen buttons are {@code AbstractButton} subclasses that render their
+ *       deafen buttons are {@code PressableWidget} subclasses that render their
  *       own icons; styling them threw the icon away and drew the accessibility
  *       label in its place.
  *       <p>This started as "nothing outside {@code net.minecraft}", which was
@@ -77,12 +80,17 @@ public class PressableWidgetMixin {
             return;
         }
 
-        OceanUi.button(
-                ctx,
-                Minecraft.getInstance().font,
-                self.getMessage(),
-                self.getX(), self.getY(), self.getWidth(), self.getHeight(),
-                self.isHovered(), self.active, blurred$isOurScreen());
+        var font = Minecraft.getInstance().font;
+        Skin skin = Skins.current();
+        if (skin == PixelSkin.INSTANCE) {
+            OceanUi.button(ctx, font, self.getMessage(),
+                    self.getX(), self.getY(), self.getWidth(), self.getHeight(),
+                    self.isHovered(), self.active, blurred$isOurScreen());
+        } else {
+            skin.button(ctx, font, self.getMessage().getString(),
+                    self.getX(), self.getY(), self.getWidth(), self.getHeight(),
+                    self.isHovered() ? 1f : 0f, false, self.active, false);
+        }
         ci.cancel();
     }
 
@@ -101,8 +109,8 @@ public class PressableWidgetMixin {
     }
 
     private static boolean blurred$shouldStyle(AbstractButton self) {
-        // Vanilla's own widgets, plus anyone's Button. A mod that wants a
-        // normal button builds a Button; a mod that wants to draw
+        // Vanilla's own widgets, plus anyone's ButtonWidget. A mod that wants a
+        // normal button builds a ButtonWidget; a mod that wants to draw
         // something of its own subclasses further, and lands in the icon tests
         // below. The vanilla-package clause is kept as well as, not instead of,
         // this — so relaxing the rule cannot un-style anything that used to be

@@ -10,20 +10,19 @@ import dev.blurredclient.mod.hud.HudRenderer;
 import dev.blurredclient.mod.social.BlurredUsers;
 import dev.blurredclient.mod.social.ServerPlayers;
 import dev.blurredclient.mod.social.Whispers;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.ConnectScreen;
-import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
-import net.minecraft.client.gui.components.Tooltip;
-import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.input.KeyEvent;
-import net.minecraft.client.multiplayer.resolver.ServerAddress;
-import net.minecraft.client.multiplayer.ServerData;
-import net.minecraft.network.chat.Component;
-
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.components.Tooltip;
+import net.minecraft.client.gui.screens.ConnectScreen;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.multiplayer.JoinMultiplayerScreen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.multiplayer.ServerData;
+import net.minecraft.client.multiplayer.resolver.ServerAddress;
+import net.minecraft.network.chat.Component;
 
 /**
  * The in-game crew panel: who's online, where they're playing, and the chat
@@ -505,10 +504,10 @@ public class CrewScreen extends Screen {
     }
 
     // Enter (257) and numpad Enter (335) send; Escape closes via super.
-    // 1.21.9+ replaced the three int parameters with a KeyEvent record.
+    // 1.21.9+ replaced the three int parameters with a KeyInput record.
     @Override
     public boolean keyPressed(KeyEvent input) {
-        if (input.input() == 257 || input.input() == 335) {
+        if (input.key() == 257 || input.key() == 335) {
             return onEnter();
         }
         return super.keyPressed(input);
@@ -524,7 +523,7 @@ public class CrewScreen extends Screen {
      * Background plus this screen's chrome.
      *
      * <p>All the panel drawing lives here rather than in {@link #render},
-     * because {@code renderBackground} is the one method the framework
+     * because {@code extractBackground} is the one method the framework
      * guarantees to call <b>exactly once per frame</b> — and calling it a second
      * time by hand is a hard crash in-game:
      *
@@ -588,13 +587,13 @@ public class CrewScreen extends Screen {
         OceanUi.panel(ctx, GAP, GAP, this.width - GAP * 2, 26, false);
         HudRenderer.porthole(ctx, GAP + 16, GAP + 13, 6);
         ctx.text(this.font, BlurredFont.of("BLURRED"),
-                GAP + 28, GAP + 9, Theme.ACCENT);
+                GAP + 28, GAP + 9, Theme.accent());
 
         Component conversation = BlurredFont.of(target.isEmpty() ? "No conversation" : target);
         int conversationW = this.font.width(conversation);
         int conversationX = this.width - GAP - 6 - conversationW;
         ctx.text(this.font, conversation, conversationX, GAP + 9,
-                target.isEmpty() ? Theme.TEXT_FAINT : Theme.ACCENT);
+                target.isEmpty() ? Theme.TEXT_FAINT : Theme.accent());
 
         String status = !bridge.isLauncherReachable()
                 ? "Launcher offline — start Blurred Client for crew and chat"
@@ -612,7 +611,7 @@ public class CrewScreen extends Screen {
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor ctx, int mouseX, int mouseY, float delta) {
-        // Background and panels come from renderBackground, which the framework
+        // Background and panels come from extractBackground, which the framework
         // calls for us — see the note there. Widgets are drawn by super.
         super.extractRenderState(ctx, mouseX, mouseY, delta);
 
@@ -685,7 +684,7 @@ public class CrewScreen extends Screen {
                     : "<" + m.from() + "> " + m.text();
             int color = m.isSystem()
                     ? Theme.TEXT_FAINT
-                    : m.mine() ? Theme.ACCENT : Theme.TEXT;
+                    : m.mine() ? Theme.accent() : Theme.TEXT;
 
             // Wrap long lines rather than clipping them.
             List<net.minecraft.util.FormattedCharSequence> wrapped =

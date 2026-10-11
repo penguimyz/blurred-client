@@ -2,6 +2,9 @@ package dev.blurredclient.mod.mixin;
 
 import dev.blurredclient.mod.social.Essential;
 import dev.blurredclient.mod.ui.OceanUi;
+import dev.blurredclient.mod.ui.kit.Backdrop;
+import dev.blurredclient.mod.ui.kit.PixelSkin;
+import dev.blurredclient.mod.ui.kit.Skins;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.TitleScreen;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * deep water.
  *
  * <p>This needs its own mixin rather than riding on {@link ScreenBackgroundMixin}:
- * {@code TitleScreen} <b>overrides</b> {@code renderBackground} to draw the
+ * {@code TitleScreen} <b>overrides</b> {@code extractBackground} to draw the
  * panorama and never calls {@code super}, so an injection on {@code Screen}
  * never fires here. That's why the menu kept showing the vanilla panorama while
  * every other screen had already turned to water.
@@ -35,6 +38,11 @@ public class TitleScreenMixin {
         }
 
         TitleScreen self = (TitleScreen) (Object) this;
+        if (Skins.current() != PixelSkin.INSTANCE) {
+            Backdrop.drawScreen(ctx, self.width, self.height, mouseX, mouseY);
+            ci.cancel();
+            return;
+        }
         OceanUi.tick(delta);
         OceanUi.background(ctx, self.width, self.height);
 

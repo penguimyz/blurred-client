@@ -1,17 +1,16 @@
 package dev.blurredclient.mod.cosmetic;
 
-import dev.blurredclient.mod.BlurredMod;
-import net.minecraft.client.Minecraft;
 import com.mojang.blaze3d.platform.NativeImage;
-import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.resources.Identifier;
-
+import dev.blurredclient.mod.BlurredMod;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.texture.DynamicTexture;
+import net.minecraft.resources.Identifier;
 
 /**
  * Holds every Blurred cape the launcher has told us about, keyed by Minecraft
@@ -188,9 +187,8 @@ public final class CapeManager {
 
         for (int y = 0; y < endY; y++) {
             for (int x = startX; x < image.getWidth(); x++) {
-                // 26.x renamed getColor to getPixel. Alpha is the high byte
-                // either way, so a zero there is a pixel that draws nothing.
-                if (((image.getPixel(x, y) >>> 24) & 0xFF) != 0) {
+                // Alpha only — a zero here is a pixel that draws nothing.
+                if (image.getLuminanceOrAlpha(x, y) != 0) {
                     return true;
                 }
             }
