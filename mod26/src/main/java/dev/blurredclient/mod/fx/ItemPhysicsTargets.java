@@ -4,7 +4,8 @@ package dev.blurredclient.mod.fx;
 public final class ItemPhysicsTargets {
     private ItemPhysicsTargets() {}
 
-    public static final String RENDER = "render(Lnet/minecraft/client/render/entity/state/ItemEntityRenderState;"
-            + "Lnet/minecraft/client/util/math/MatrixStack;Lnet/minecraft/client/render/command/OrderedRenderCommandQueue;"
-            + "Lnet/minecraft/client/render/state/CameraRenderState;)V";
+    /** 26.x: {@code submit} replaced {@code render}. */
+    public static final String RENDER = "submit(Lnet/minecraft/client/renderer/entity/state/ItemEntityRenderState;"
+            + "Lcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;"
+            + "Lnet/minecraft/client/renderer/state/level/CameraRenderState;)V";
 }

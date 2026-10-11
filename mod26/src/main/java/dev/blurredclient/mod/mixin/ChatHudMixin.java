@@ -48,7 +48,7 @@ public class ChatHudMixin {
         }
     }
 
-    @ModifyConstant(method = {"addMessageToQueue(Lnet/minecraft/client/GuiMessage;)V", "addMessageToDisplayQueue"},
+    @ModifyConstant(method = {"addMessageToQueue(Lnet/minecraft/client/multiplayer/chat/GuiMessage;)V", "addMessageToDisplayQueue"},
             constant = @Constant(intValue = 100), require = 0)
     private int blurred$history(int vanilla) {
         return Modules.LONG_CHAT.limit(vanilla);
