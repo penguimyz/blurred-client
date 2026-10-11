@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useInstanceStore } from "../store/instanceStore";
+import { useForceQuit } from "../components/ForceQuitConfirm";
 import { useAccountStore } from "../store/accountStore";
 import { useChatStore } from "../store/chatStore";
 import { GlassCard } from "../components/GlassCard";
@@ -30,7 +31,6 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
     refresh,
     refreshRunning,
     launch,
-    quit,
     rename,
     duplicate,
     remove,
@@ -39,6 +39,10 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
 
   const accounts = useAccountStore((s) => s.accounts);
   const { connected, refreshFriends, wire, crew, incoming } = useChatStore();
+
+  // Quit goes through here rather than straight to the store — it force-kills
+  // the game, so it asks first. See ForceQuitConfirm.
+  const { requestQuit, dialog: forceQuitDialog } = useForceQuit();
 
   const [showCreate, setShowCreate] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -139,7 +143,7 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
             isRunning={!!running[hero.id]}
             onSelect={setHeroId}
             onLaunch={() => launch(hero.id).catch(() => {})}
-            onQuit={() => quit(hero.id).catch(() => {})}
+            onQuit={() => requestQuit(hero.id, hero.name)}
             onConfigure={() => onOpenInstance(hero.id)}
           />
         )}
@@ -242,7 +246,7 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          quit(inst.id).catch(() => {});
+                          requestQuit(inst.id, inst.name);
                         }}
                         style={{
                           width: "100%",
@@ -416,6 +420,9 @@ export function Home({ onOpenInstance }: { onOpenInstance: (id: string) => void 
       {showImport && (
         <ImportLauncherModal onClose={() => setShowImport(false)} onImported={refresh} />
       )}
+
+      {/* Serves both Quit buttons on this page — the hero's and the grid's. */}
+      {forceQuitDialog}
     </div>
   );
 }

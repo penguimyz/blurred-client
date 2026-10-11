@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Icon";
+import { QuitConfirm, collectQuitTargets } from "./QuitConfirm";
 import { useBubbleCount } from "../lib/bubbleCounter";
 
 // Custom window chrome. The app runs with `decorations: false` +
@@ -98,6 +99,7 @@ function BubbleTally() {
 
 export function TitleBar() {
   const [maximized, setMaximized] = useState(false);
+  const [atRisk, setAtRisk] = useState<{ games: string[]; servers: string[] } | null>(null);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -112,7 +114,48 @@ export function TitleBar() {
     return () => unlisten?.();
   }, []);
 
+  // Intercept every close, not just the X. `close()` from our own button, Alt+F4
+  // and a taskbar "Close window" all arrive here, so the confirmation can't be
+  // routed around — which matters, because the hazard it warns about (see
+  // QuitConfirm) doesn't care which one you used.
+  //
+  // The close is always cancelled first and re-issued as `destroy()` once
+  // there's an answer, because deciding whether to ask means a round trip to
+  // the backend and `onCloseRequested` cannot be awaited — by the time the
+  // process table comes back, the window would already be gone.
+  useEffect(() => {
+    // Only the launcher itself. A popped-out log window closing takes nothing
+    // down with it, so warning about losing a world there would be a lie — and
+    // an annoying one, since closing a log window is a thing you do often.
+    if (appWindow.label !== "main") return;
+
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    appWindow
+      .onCloseRequested((event) => {
+        event.preventDefault();
+        collectQuitTargets()
+          .then((targets) => {
+            if (targets.games.length === 0 && targets.servers.length === 0) {
+              appWindow.destroy();
+            } else {
+              setAtRisk(targets);
+            }
+          })
+          // If we can't tell what's running, don't hold the window hostage over
+          // it — an unclosable launcher is a worse failure than an unasked
+          // question.
+          .catch(() => appWindow.destroy());
+      })
+      .then((fn) => (cancelled ? fn() : (unlisten = fn)));
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   return (
+    <>
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-title" data-tauri-drag-region>
         <Logo size={15} />
@@ -136,5 +179,19 @@ export function TitleBar() {
         </button>
       </div>
     </div>
+
+    {/* Outside the bar, not inside it: `.titlebar` is `user-select: none` and a
+        drag region, neither of which a dialog with body text wants to inherit. */}
+    {atRisk && (
+      <QuitConfirm
+        games={atRisk.games}
+        servers={atRisk.servers}
+        onCancel={() => setAtRisk(null)}
+        // `destroy`, not `close`: close would come straight back round to the
+        // handler above and the window would never shut.
+        onConfirm={() => appWindow.destroy()}
+      />
+    )}
+    </>
   );
 }

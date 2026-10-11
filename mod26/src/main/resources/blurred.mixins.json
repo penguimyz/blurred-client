@@ -1,0 +1,18 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.blurredclient.mod.mixin",
+  "//": "JAVA_25, not 21: this is the class-file version mixin will accept, and 26.x targets Java 25 (Loom refuses to configure on anything lower). Left at 21 it rejects our own mixin classes as too new.",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "PlayerSkinTexturesMixin",
+    "ScreenBackgroundMixin",
+    "PressableWidgetMixin",
+    "MouseClickMixin",
+    "TitleScreenMixin",
+    "PlayerListPingMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

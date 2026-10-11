@@ -12,6 +12,12 @@ export interface Friend {
   addedAt: string;
   online: boolean;
   status: FriendStatus;
+  /**
+   * The Minecraft server they're playing on, or "" when they aren't or haven't
+   * shared it. Relayed crew-to-crew over CTCP (see chat.rs) and only ever
+   * populated for accepted friends.
+   */
+  server: string;
 }
 
 /** Emitted when an inbound message changed the friends list. */

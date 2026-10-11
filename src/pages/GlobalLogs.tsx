@@ -4,6 +4,7 @@ import { Icon } from "../components/Icon";
 import { crashToText } from "../components/CrashBanner";
 import { PageHeader } from "../components/PageHeader";
 import * as api from "../lib/tauri";
+import { openLogWindow } from "../lib/logWindow";
 import type { CrashReport } from "../types/crash";
 
 /**
@@ -15,8 +16,16 @@ import type { CrashReport } from "../types/crash";
  * Per-instance *live* logs still stream in each instance's own Logs tab — this
  * page is the after-the-fact record.
  */
-export function GlobalLogs({ onOpenInstance }: { onOpenInstance: (id: string) => void }) {
+export function GlobalLogs({
+  onOpenInstance,
+  popped = false,
+}: {
+  onOpenInstance: (id: string) => void;
+  /** True when this *is* the popped-out window. */
+  popped?: boolean;
+}) {
   const [reports, setReports] = useState<CrashReport[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [fullLog, setFullLog] = useState<string | null>(null);
@@ -70,20 +79,36 @@ export function GlobalLogs({ onOpenInstance }: { onOpenInstance: (id: string) =>
       <PageHeader
         page="logs"
         actions={
-          reports.length > 0 ? (
-            <button
-              onClick={async () => {
-                if (confirm("Clear all saved crash reports? The log files on disk are kept.")) {
-                  await api.clearCrashReports().catch(() => {});
-                  load();
-                }
-              }}
-            >
-              Clear all
-            </button>
-          ) : undefined
+          <div style={{ display: "flex", gap: 8 }}>
+            {/* Hidden inside the popped-out copy: a button that opens the
+                window you're already looking at is just a puzzle. */}
+            {!popped && (
+              <button
+                onClick={() => void openLogWindow().catch((e) => setError(String(e)))}
+                title="Open crash history in its own window, so it can sit beside the launcher"
+              >
+                Open in a window
+              </button>
+            )}
+            {reports.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (confirm("Clear all saved crash reports? The log files on disk are kept.")) {
+                    await api.clearCrashReports().catch(() => {});
+                    load();
+                  }
+                }}
+              >
+                Clear all
+              </button>
+            )}
+          </div>
         }
       />
+
+      {error && (
+        <p style={{ color: "var(--danger)", fontSize: 12.5, marginBottom: 12 }}>{error}</p>
+      )}
 
       {loading && <p style={{ color: "var(--text-secondary)", fontSize: 13 }}>Loading…</p>}
 

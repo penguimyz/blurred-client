@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { GlobalSettings, Theme } from "../types/settings";
+import type { GlobalSettings, Theme, UiStyle } from "../types/settings";
 import * as api from "../lib/tauri";
 
 // Theme + accent are applied to the document root the moment settings load and
@@ -15,6 +15,19 @@ export function applyTheme(theme: Theme) {
         : "dark"
       : theme;
   document.documentElement.setAttribute("data-theme", resolved);
+}
+
+// The launcher's look. theme.css keys the Modern overrides off [data-style].
+// Remembered locally too, so main.tsx can apply it before settings load and a
+// Modern launcher doesn't flash the ocean on startup.
+export function applyStyle(style: UiStyle) {
+  const resolved = style ?? "ocean";
+  document.documentElement.setAttribute("data-style", resolved);
+  try {
+    localStorage.setItem("blurred.uiStyle", resolved);
+  } catch {
+    // Storage unavailable: only costs the startup flash.
+  }
 }
 
 export function applyAccent(hex: string) {
@@ -39,6 +52,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
     try {
       const settings = await api.getSettings();
       applyTheme(settings.theme);
+      applyStyle(settings.uiStyle);
       applyAccent(settings.accentColor);
       set({ settings, loading: false });
     } catch (e) {
@@ -49,6 +63,7 @@ export const useSettingsStore = create<SettingsStore>((set) => ({
   save: async (settings) => {
     const saved = await api.updateSettings(settings);
     applyTheme(saved.theme);
+    applyStyle(saved.uiStyle);
     applyAccent(saved.accentColor);
     set({ settings: saved });
   },

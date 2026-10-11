@@ -23,3 +23,7 @@ Thumbs.db
 
 # If you add a local CurseForge API key config per curseforge.rs's TODO,
 # make sure whatever file you put it in is listed here too.
+
+# The 26.x mod build (separate Gradle project — see mod26/settings.gradle).
+mod26/build/
+mod26/.gradle/

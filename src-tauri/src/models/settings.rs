@@ -10,10 +10,23 @@ pub enum Theme {
     System,
 }
 
+/// The launcher's look, matching the mod's menu styles: Ocean is the pixel-art
+/// water theme, Modern is the mod's flat dark look with the blue accent.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum UiStyle {
+    #[default]
+    Ocean,
+    Modern,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlobalSettings {
     pub theme: Theme,
+    /// `#[serde(default)]` so settings.json files from before this field load as Ocean.
+    #[serde(default)]
+    pub ui_style: UiStyle,
     pub accent_color: String, // hex, e.g. "#7C9CFF"
     pub default_java: JavaSettings,
     pub default_env_vars: EnvVars,
@@ -30,10 +43,16 @@ pub struct GlobalSettings {
     #[serde(default = "default_msa_client_id")]
     pub msa_client_id: String,
     // GitHub "owner/name" to check for launcher updates against; empty disables
-    // the check. Auto-install isn't wired (needs signed releases) — this powers
-    // the "check for updates" notice only.
-    #[serde(default)]
+    // the check. Defaults to the project's own repo so updates work out of the
+    // box — a launcher that only updates if you first go and type its own
+    // address into settings is a launcher that never updates.
+    #[serde(default = "default_update_repo")]
     pub update_repo: String,
+    /// Download and install a newer release on startup, rather than only
+    /// mentioning it. Skipped while a game or server is running — see
+    /// `UpdateBanner` on the frontend, which owns that decision.
+    #[serde(default = "default_true")]
+    pub auto_install_updates: bool,
 
     // ---- Chat (Sonar) ----
     // IRC endpoint. Empty values fall back to the constants in commands::chat,
@@ -48,6 +67,28 @@ pub struct GlobalSettings {
     /// Connect to chat automatically once an account is available.
     #[serde(default)]
     pub chat_auto_connect: bool,
+
+    // ---- Discord ----
+    /// Discord application ID for the in-game rich presence ("Blurred Client —
+    /// On a server"). Empty disables it.
+    ///
+    /// Defaults to the project's own registered application, so the status
+    /// works with nothing to configure. It has to be *some* specific
+    /// application rather than a generic identifier, because Discord takes the
+    /// bold first line of the status from that application's name — which is
+    /// also why pointing this at your own app renames the status to whatever
+    /// you called it.
+    ///
+    /// Passed to every instance at launch as a JVM property, so it's set once
+    /// here rather than per instance.
+    #[serde(default = "default_discord_app_id")]
+    pub discord_app_id: String,
+    /// Show "In the launcher" on Discord while the launcher is open and no
+    /// game is running. Yields to the in-game mod the moment one starts —
+    /// Discord shows one activity per application, so they take turns rather
+    /// than overwrite each other. See `commands::discord`.
+    #[serde(default = "default_true")]
+    pub discord_launcher_presence: bool,
 
     // ---- Cosmetic ----
     /// The cursor-following school of fish. Off by default — it's a toy, and an
@@ -93,10 +134,22 @@ pub fn default_msa_client_id() -> String {
     "c9c50f80-25c7-4dfd-ba2c-215636be66c4".to_string()
 }
 
+/// Where releases come from. Same repo the source lives in.
+pub fn default_update_repo() -> String {
+    "penguimyz/blurred-client".to_string()
+}
+
+/// The project's Discord application. Public identifier, not a secret — it's
+/// broadcast to every Discord client that renders the status.
+pub fn default_discord_app_id() -> String {
+    "1535178618907664494".to_string()
+}
+
 impl Default for GlobalSettings {
     fn default() -> Self {
         Self {
             theme: Theme::Dark,
+            ui_style: UiStyle::Ocean,
             accent_color: DEFAULT_ACCENT.to_string(),
             default_java: JavaSettings {
                 executable_path: None,
@@ -109,11 +162,14 @@ impl Default for GlobalSettings {
             instance_storage_path: String::new(), // resolved at runtime via `directories`
             update_check_frequency_minutes: 60,
             msa_client_id: default_msa_client_id(),
-            update_repo: String::new(),
+            update_repo: default_update_repo(),
+            auto_install_updates: true,
             chat_server: default_chat_server(),
             chat_port: default_chat_port(),
             chat_channel: default_chat_channel(),
             chat_auto_connect: false,
+            discord_app_id: default_discord_app_id(),
+            discord_launcher_presence: true,
             fish_enabled: false,
             sea_life_enabled: true,
         }

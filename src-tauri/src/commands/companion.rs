@@ -32,10 +32,20 @@ const RESOURCE_DIR: &str = "resources/mod";
 
 /// Minecraft versions with a bundled jar.
 ///
-/// Must match the version list in `mod/settings.gradle`. Installing a jar into
-/// a version it wasn't built for doesn't degrade gracefully — the game crashes
-/// on startup — so an instance outside this list gets no companion at all.
-const SUPPORTED_MC: &[&str] = &["1.21.1", "1.21.4", "1.21.8", "1.21.10", "1.21.11"];
+/// Must match the version lists in `mod/settings.gradle` (1.21.x, built by
+/// Stonecutter from one yarn-named source tree) **and** `mod26/` (26.x, a
+/// separate project against Mojang's own names — 26.x ships unobfuscated, so
+/// there is no yarn for it).
+///
+/// Installing a jar into a version it wasn't built for doesn't degrade
+/// gracefully — the game crashes on startup — so an instance outside this list
+/// gets no companion at all.
+///
+/// **26.2 is a skeleton for now.** It loads and logs, and nothing more: the
+/// features are still yarn-named in `mod/` and haven't been ported. It's listed
+/// here so the load path can be tested on a real 26.2 instance; expect no HUD,
+/// capes, crew or Discord status there yet.
+const SUPPORTED_MC: &[&str] = &["1.21.1", "1.21.4", "1.21.8", "1.21.10", "1.21.11", "26.2"];
 
 /// Copy (or refresh) the companion mod inside an instance.
 ///

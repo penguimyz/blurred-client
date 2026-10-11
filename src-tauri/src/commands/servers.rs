@@ -43,6 +43,8 @@ pub struct RunningServer {
     /// Set when the user asked it to stop, so the supervisor can tell a clean
     /// shutdown apart from a crash and only auto-restart the latter.
     pub stopping: bool,
+    /// Bring it straight back up once it has exited. Set by `restart_server`.
+    pub restart_after_stop: bool,
 }
 
 #[derive(Default)]
@@ -324,11 +326,45 @@ fn write_properties(dir: &Path, server: &Server) -> Result<(), String> {
 
 /// Fetch the server jar if it isn't already there. Emits progress as log lines
 /// so the console shows what's happening rather than sitting blank.
+/// The server jar for this server's loader and Minecraft version, downloading
+/// it if we haven't got it.
+///
+/// # Why the filename carries the version
+///
+/// This used to be a single `server.jar` with an "exists? then use it" check,
+/// which was fine while the version was fixed at creation. Now that it can be
+/// changed, that check is a trap: switching a server from 1.21.1 to 1.21.11
+/// would keep launching the 1.21.1 jar forever, and the only symptom would be
+/// a server quietly running the wrong version.
+///
+/// Keying the filename on both loader and version fixes that and makes
+/// switching back free — the old jar is still sitting there.
 async fn ensure_jar(app: &AppHandle, dir: &Path, server: &Server) -> Result<PathBuf, String> {
-    let jar = dir.join("server.jar");
+    let jar = dir.join(format!(
+        "server-{}-{}.jar",
+        match server.loader {
+            Loader::Fabric => "fabric",
+            Loader::Quilt => "quilt",
+            Loader::Forge => "forge",
+            Loader::NeoForge => "neoforge",
+            Loader::Vanilla => "vanilla",
+        },
+        // Allow-list rather than escape-list: the version becomes a filename,
+        // and a version string is only ever digits, dots and dashes anyway.
+        server
+            .mc_version
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' { c } else { '_' })
+            .collect::<String>()
+    ));
     if jar.exists() {
         return Ok(jar);
     }
+
+    // A jar from before per-version naming. We can't tell which version it is,
+    // so it can't be reused — but it can be cleared out rather than left as
+    // dead weight once its replacement is on disk.
+    let legacy = dir.join("server.jar");
 
     let log = |line: &str| {
         let _ = app.emit(
@@ -369,6 +405,9 @@ async fn ensure_jar(app: &AppHandle, dir: &Path, server: &Server) -> Result<Path
     }
     let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
     std::fs::write(&jar, &bytes).map_err(|e| e.to_string())?;
+    if legacy.exists() {
+        let _ = std::fs::remove_file(&legacy);
+    }
     log(&format!("Server jar ready ({:.1} MB)", bytes.len() as f64 / 1_048_576.0));
 
     Ok(jar)
@@ -583,6 +622,7 @@ async fn start_server_impl(app: &AppHandle, state: &AppState, id: String) -> Res
             started: std::time::Instant::now(),
             players: Vec::new(),
             stopping: false,
+            restart_after_stop: false,
         },
     );
 
@@ -656,12 +696,14 @@ async fn start_server_impl(app: &AppHandle, state: &AppState, id: String) -> Res
         // Scoped tightly: this block now awaits further down for the
         // auto-restart, and a `State` still in scope across an `.await` makes
         // the whole task non-`Send` and unspawnable.
-        let was_stopping = {
+        let (was_stopping, restart_requested) = {
             let st = app_wait.state::<AppState>();
             let entry = st.servers.running.lock().unwrap().remove(&id_wait);
             // Absent means something already removed it — `kill_server` does,
             // and that is a deliberate stop.
-            entry.map(|r| r.stopping).unwrap_or(true)
+            entry
+                .map(|r| (r.stopping, r.restart_after_stop))
+                .unwrap_or((true, false))
         };
 
         let code = status.and_then(|s| s.code()).unwrap_or(-1);
@@ -674,6 +716,26 @@ async fn start_server_impl(app: &AppHandle, state: &AppState, id: String) -> Res
         // the user pressed Stop would make the button appear broken, and
         // restarting a server that crashes instantly would spin forever — so
         // the crash case waits before coming back.
+        // A restart the user asked for comes back regardless of exit code —
+        // it went down because we told it to.
+        if restart_requested {
+            let _ = app_wait.emit(
+                "server-log",
+                serde_json::json!({
+                    "serverId": id_wait,
+                    "line": format!("Stopped. Coming back up in {RESTART_DELAY_SECS}s…"),
+                }),
+            );
+            let queue = {
+                let st = app_wait.state::<AppState>();
+                st.servers.restart_tx.get().cloned()
+            };
+            if let Some(tx) = queue {
+                let _ = tx.send(id_wait.clone());
+            }
+            return;
+        }
+
         let crashed = !was_stopping && code != 0;
         if crashed && crate::commands::server_admin::wants_auto_restart(&app_wait, &id_wait) {
             let _ = app_wait.emit(
@@ -762,6 +824,30 @@ pub async fn stop_server(state: State<'_, AppState>, id: String) -> Result<(), S
     r.stopping = true;
     // `stop` rather than killing the process: Minecraft flushes chunks on this
     // command, and killing it instead is how worlds get corrupted.
+    let _ = r.stdin.send("stop".to_string());
+    Ok(())
+}
+
+/// Stop a server and bring it straight back up.
+///
+/// Routed through the same queue the crash supervisor uses rather than doing
+/// stop-then-start inline, for two reasons. The JVM does not release the world
+/// lock the instant `stop` returns, so starting immediately can fail on a file
+/// still held open; and `stop` is asynchronous anyway — it hands the console a
+/// command and returns, so there is nothing here to await. Flagging the running
+/// entry means the exit handler restarts it once the process has genuinely
+/// gone, which is the only moment that's safe.
+#[tauri::command]
+pub async fn restart_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    check_id(&id)?;
+    let mut running = state.servers.running.lock().unwrap();
+    let Some(r) = running.get_mut(&id) else {
+        return Err("That server isn't running.".to_string());
+    };
+    // `stopping` as well, so the crash supervisor doesn't also try to bring it
+    // back and start two of them.
+    r.stopping = true;
+    r.restart_after_stop = true;
     let _ = r.stdin.send("stop".to_string());
     Ok(())
 }

@@ -1162,3 +1162,306 @@ input[type="range"] {
     animation: none !important;
   }
 }
+
+/*
+  ============================================================
+  Modern style ([data-style="modern"], Settings > Appearance > Style)
+  ============================================================
+  The mod's Modern menu look (ModernSkin.java) brought to the launcher: flat,
+  dark and smooth. Near-black panels with a hairline border, one blue accent
+  for anything selected, white text in Varela Round, small rounded corners.
+  No water, dither, sheen or hard pixel shadows: the contrast between dark
+  panels and the accent does the work. Everything here overrides the Ocean
+  rules above, so this block stays last in the file.
+*/
+@font-face {
+  font-family: "Varela Round";
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src: url("./fonts/varela-round-400.ttf") format("truetype");
+}
+
+[data-style="modern"] {
+  --glass-bg: rgba(16, 16, 20, 0.86);
+  --glass-bg-elevated: rgba(18, 19, 25, 0.95);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-sheen: transparent;
+  --glass-blur: 14px;
+  --glass-shadow: none;
+
+  --text-primary: #ffffff;
+  --text-secondary: #b4b8c4;
+  --text-tertiary: #7a7f8e;
+
+  --accent: #26b4e6;
+  --accent-fg: #ffffff;
+  --accent-glow: rgba(38, 180, 230, 0.3);
+
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f05264;
+
+  --backdrop-gradient: linear-gradient(180deg, #0f1015 0%, #0a0b0f 60%, #060709 100%);
+  --hero-gradient: linear-gradient(135deg, rgba(26, 27, 33, 0.92), rgba(14, 15, 19, 0.95));
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --edge: 1px;
+  --drop: 0px;
+
+  --font-pixel: "Varela Round", var(--font-ui);
+}
+
+[data-style="modern"][data-theme="light"] {
+  --glass-bg: rgba(255, 255, 255, 0.88);
+  --glass-bg-elevated: rgba(255, 255, 255, 0.96);
+  --glass-border: rgba(16, 20, 30, 0.1);
+  --text-primary: #12141a;
+  --text-secondary: #4a4f5c;
+  --text-tertiary: #80858f;
+  --backdrop-gradient: linear-gradient(180deg, #f2f3f6 0%, #e6e8ee 100%);
+  --hero-gradient: linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(236, 238, 243, 0.95));
+}
+
+/* Smooth text: Varela Round is a vector face, so antialias it again. */
+[data-style="modern"] h1,
+[data-style="modern"] h2,
+[data-style="modern"] h3,
+[data-style="modern"] h4,
+[data-style="modern"] button,
+[data-style="modern"] label,
+[data-style="modern"] .pixel,
+[data-style="modern"] .rail-btn::after,
+[data-style="modern"] .titlebar-title,
+[data-style="modern"] .titlebar-bubbles,
+[data-style="modern"] select {
+  -webkit-font-smoothing: antialiased;
+  font-smooth: auto;
+  letter-spacing: 0;
+}
+
+[data-style="modern"] * {
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+[data-style="modern"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  background-clip: content-box;
+  border-radius: 6px;
+}
+
+[data-style="modern"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+  background-clip: content-box;
+}
+
+/* Panels: one flat fill and a hairline border. */
+[data-style="modern"] .glass-card {
+  box-shadow: none;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+[data-style="modern"] .glass-card::before,
+[data-style="modern"] .glass-card::after {
+  display: none;
+}
+
+[data-style="modern"] .glass-card:hover {
+  transform: none;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+}
+
+[data-style="modern"][data-theme="light"] .glass-card:hover {
+  border-color: rgba(16, 20, 30, 0.18);
+}
+
+[data-style="modern"] .mono-field {
+  background: rgba(11, 12, 16, 0.88);
+}
+
+[data-style="modern"][data-theme="light"] .mono-field {
+  background: rgba(240, 242, 246, 0.9);
+}
+
+/* Buttons: flat, no hard shadow, no sinking press; a quick darken instead. */
+[data-style="modern"] button.accent {
+  border: 1px solid transparent;
+  box-shadow: none;
+  text-transform: none;
+  font-size: 13px;
+  transition: filter 140ms ease, background 140ms ease;
+}
+
+[data-style="modern"] button.accent:active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  filter: brightness(0.85);
+}
+
+[data-style="modern"] button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare) {
+  background: #1a1b21;
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: none;
+  font-size: 13px;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+[data-style="modern"] button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):hover {
+  background: #24262e;
+  border-color: rgba(38, 180, 230, 0.6);
+}
+
+[data-style="modern"] button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):active:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  filter: brightness(0.85);
+}
+
+[data-style="modern"][data-theme="light"] button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare) {
+  background: #ffffff;
+  border-color: rgba(16, 20, 30, 0.12);
+}
+
+[data-style="modern"][data-theme="light"] button:not(.accent):not(.tb-btn):not(.rail-btn):not(.bare):hover {
+  background: #f0f2f6;
+}
+
+/* Fields: dark inset fill, hairline border, accent border when focused. */
+[data-style="modern"] select,
+[data-style="modern"] input[type="text"],
+[data-style="modern"] input[type="number"],
+[data-style="modern"] input[type="search"],
+[data-style="modern"] input[type="url"],
+[data-style="modern"] input:not([type]),
+[data-style="modern"] textarea {
+  background-color: rgba(11, 12, 16, 0.88);
+  border: 1px solid var(--glass-border);
+  box-shadow: none;
+  transition: border-color 140ms ease;
+}
+
+[data-style="modern"] select {
+  font-size: 13px;
+}
+
+[data-style="modern"] select:hover,
+[data-style="modern"] input:hover,
+[data-style="modern"] textarea:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+[data-style="modern"] input:focus-visible,
+[data-style="modern"] select:focus-visible,
+[data-style="modern"] textarea:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+[data-style="modern"] select option {
+  background: #121319;
+  color: #ffffff;
+}
+
+[data-style="modern"][data-theme="light"] select,
+[data-style="modern"][data-theme="light"] input[type="text"],
+[data-style="modern"][data-theme="light"] input[type="number"],
+[data-style="modern"][data-theme="light"] input[type="search"],
+[data-style="modern"][data-theme="light"] input[type="url"],
+[data-style="modern"][data-theme="light"] input:not([type]),
+[data-style="modern"][data-theme="light"] textarea {
+  background-color: rgba(255, 255, 255, 0.95);
+}
+
+[data-style="modern"][data-theme="light"] select option {
+  background: #ffffff;
+  color: #12141a;
+}
+
+/* Window chrome. */
+[data-style="modern"] .titlebar-bubbles {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+
+[data-style="modern"] .tb-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Rail: a solid dark strip; the active item gets a tinted pill and a rounded marker. */
+[data-style="modern"] .rail {
+  background: rgba(13, 13, 17, 0.92);
+}
+
+[data-style="modern"][data-theme="light"] .rail {
+  background: rgba(255, 255, 255, 0.85);
+}
+
+[data-style="modern"] .rail-btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-style="modern"] .rail-btn.active {
+  background: rgba(38, 180, 230, 0.12);
+}
+
+[data-style="modern"] .rail-btn.active::before {
+  width: 3px;
+  border-radius: 2px;
+}
+
+[data-style="modern"] .rail-btn::after {
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  border-width: 1px;
+  text-transform: none;
+  font-size: 12px;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+[data-style="modern"] .rail-pip,
+[data-style="modern"] .presence,
+[data-style="modern"] .ping,
+[data-style="modern"] .ping::after {
+  border-radius: 50%;
+}
+
+[data-style="modern"] .ping::after {
+  animation-timing-function: ease-out;
+}
+
+/* Backdrop: no water, just a plain dark gradient with two faint accent glows. */
+[data-style="modern"] .backdrop-bands,
+[data-style="modern"] .backdrop-dither,
+[data-style="modern"] .backdrop-rays,
+[data-style="modern"] .backdrop-motes,
+[data-style="modern"] .backdrop-blob.b3 {
+  display: none;
+}
+
+[data-style="modern"] .backdrop-blob.b1 {
+  background: #26b4e6;
+  opacity: 0.08;
+}
+
+[data-style="modern"] .backdrop-blob.b2 {
+  background: #2440a0;
+  opacity: 0.1;
+}
+
+[data-style="modern"][data-theme="light"] .backdrop-blob {
+  opacity: 0.12;
+}
+
+/* Chat. */
+[data-style="modern"] .chat-row:hover,
+[data-style="modern"] .chat-entry:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+[data-style="modern"] .chat-row.mention,
+[data-style="modern"] .chat-entry.active {
+  background: rgba(38, 180, 230, 0.12);
+}

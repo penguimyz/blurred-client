@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { GlassCard } from "../components/GlassCard";
 import { Icon } from "../components/Icon";
+import { McVersionPicker } from "../components/McVersionPicker";
 import { PageHeader } from "../components/PageHeader";
 import * as api from "../lib/tauri";
 import { formatBytes, formatDate, formatDuration, formatRelativeDate } from "../lib/format";
@@ -341,6 +342,18 @@ function StatusCard({
         </button>
         {running && (
           <button
+            onClick={() =>
+              api.restartServer(server.id).then(onChanged).catch((e) => onError(String(e)))
+            }
+            title="Stop the server and bring it straight back up. Saves the world first, same as Stop."
+            style={{ display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <Icon name="refresh" size={14} />
+            Restart
+          </button>
+        )}
+        {running && (
+          <button
             onClick={() => api.killServer(server.id).catch((e) => onError(String(e)))}
             title="Force kill — skips saving the world"
             style={{ color: "var(--danger)" }}
@@ -584,7 +597,27 @@ function SettingsTab({
     <>
       {running && (
         <div style={{ fontSize: 11.5, color: "var(--warning)", marginBottom: 12 }}>
-          The server is running — changes apply the next time it starts.
+          The server is running — changes apply the next time it starts. The
+          Minecraft version is locked while it's up.
+        </div>
+      )}
+
+      {draft.mcVersion !== server.mcVersion && (
+        <div
+          style={{
+            fontSize: 11.5,
+            lineHeight: 1.6,
+            marginBottom: 12,
+            padding: "9px 11px",
+            background: "rgba(255, 179, 71, 0.09)",
+            border: "1px solid rgba(255, 179, 71, 0.35)",
+          }}
+        >
+          <strong>Changing {server.mcVersion} → {draft.mcVersion}.</strong> The
+          matching server jar is downloaded on the next start. Your world is kept
+          and will be upgraded in place if you're moving up — but Minecraft cannot
+          open a world on an <em>older</em> version than it was last saved with,
+          so going back needs a backup. There's one on the Backups tab.
         </div>
       )}
 
@@ -593,6 +626,13 @@ function SettingsTab({
         <div style={grid}>
           <Field label="Name">
             <input value={draft.name} onChange={(e) => set("name", e.target.value)} style={inp} />
+          </Field>
+          <Field label="Minecraft version">
+            <McVersionPicker
+              value={draft.mcVersion}
+              onChange={(v) => set("mcVersion", v)}
+              disabled={running}
+            />
           </Field>
           <Field label="Port">
             <input
@@ -1242,7 +1282,7 @@ function CreateServerModal({ onClose, onDone }: { onClose: () => void; onDone: (
         </Field>
         <div style={{ display: "flex", gap: 10 }}>
           <Field label="Minecraft version">
-            <input value={mcVersion} onChange={(e) => setMcVersion(e.target.value)} style={inp} disabled={busy} />
+            <McVersionPicker value={mcVersion} onChange={setMcVersion} disabled={busy} />
           </Field>
           <Field label="Port">
             <input type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} style={inp} disabled={busy} />

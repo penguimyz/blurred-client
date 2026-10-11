@@ -1,0 +1,32 @@
+pluginManagement {
+    repositories {
+        maven { url = 'https://maven.fabricmc.net/' }
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+/*
+  The Minecraft 26.x build of the companion mod.
+
+  # Why this is a separate project rather than another Stonecutter version
+
+  26.x is the release where Mojang stopped obfuscating the game. Fabric
+  followed: there is no yarn and no intermediary for 26.x — check
+  `maven.fabricmc.net/net/fabricmc/yarn/26.2/` and you get a 404, not an empty
+  directory — because there is nothing left to deobfuscate. Mods are written
+  against Mojang's own names.
+
+  The 1.21.x tree next door is written entirely in yarn names. `MinecraftClient`
+  is `Minecraft` here, `DrawContext` is `GuiGraphics`, `Text` is `Component`,
+  `Identifier` is `ResourceLocation`. That is not an API difference Stonecutter
+  can bridge with a `//?` branch or two — it is every type reference in every
+  file, so putting both in one preprocessed tree would mean branching almost
+  every line.
+
+  The cost of this split is real and worth stating: the HUD, the launcher
+  bridge, cape handling, Discord presence and the crew screen now exist twice,
+  and a fix to one has to be made in the other by hand. That was the deliberate
+  trade — it buys zero risk to five working versions.
+*/
+rootProject.name = 'blurred-mod-26'

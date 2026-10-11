@@ -39,6 +39,16 @@ pub fn run() {
                 });
             }
 
+            // Put the capes that ship with the launcher into the user's
+            // library. Once — see seed_builtins.
+            {
+                let state = app.state::<AppState>();
+                crate::commands::capes::seed_builtins(app.handle(), &state.data_dir);
+            }
+
+            // "In the launcher" on Discord, while no game is running.
+            crate::commands::discord::start(app.handle().clone());
+
             // Brings crashed servers back up for anyone who asked for it.
             // Started here so the queue exists before any server can be
             // launched — see `servers::start_restart_worker`.
@@ -124,7 +134,9 @@ pub fn run() {
             commands::online_auth::set_account_skin,
             commands::online_auth::set_account_skin_file,
             commands::online_auth::reset_account_skin,
+            commands::mojang::list_mc_versions,
             commands::update::check_launcher_update,
+            commands::update::install_launcher_update,
             commands::chat::chat_status,
             commands::chat::chat_connect,
             commands::chat::chat_disconnect,
@@ -148,6 +160,12 @@ pub fn run() {
             commands::capes::delete_cape,
             commands::capes::read_cape,
             commands::capes::set_active_cape,
+            commands::skins::list_skins,
+            commands::skins::save_skin,
+            commands::skins::update_skin,
+            commands::skins::rename_skin,
+            commands::skins::delete_skin,
+            commands::skins::read_skin,
             commands::servers::list_servers,
             commands::servers::create_server,
             commands::servers::update_server,
@@ -156,6 +174,7 @@ pub fn run() {
             commands::servers::accept_eula,
             commands::servers::start_server,
             commands::servers::stop_server,
+            commands::servers::restart_server,
             commands::servers::kill_server,
             commands::servers::server_command,
             commands::servers::server_statuses,

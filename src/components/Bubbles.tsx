@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { animate } from "../lib/animation";
 import { recordBubblePop } from "../lib/bubbleCounter";
 
 /**
@@ -42,9 +43,16 @@ interface Bubble {
   /** Horizontal wobble phase. */
   phase: number;
   drift: number;
-  /** Counts down while the pop animation plays; 0 means alive. */
+  /**
+   * Counts down while the pop animation plays; 0 means alive. In 60Hz frames,
+   * so it's a duration rather than a frame count and the burst lasts the same
+   * tenth of a second on every display.
+   */
   popping: number;
 }
+
+/** How long a pop burst plays, in 60Hz frames. */
+const POP_FRAMES = 6;
 
 export function Bubbles() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -111,17 +119,19 @@ export function Bubbles() {
       // No preventDefault and no stopPropagation: the click must still reach
       // whatever UI is underneath.
       if (best >= 0) {
-        bubbles[best].popping = 6;
+        bubbles[best].popping = POP_FRAMES;
         recordBubblePop();
       }
     }
 
     window.addEventListener("mousedown", onPointerDown, true);
 
-    let raf = 0;
+    let stop: (() => void) | undefined;
     let lastSpawn = performance.now();
 
-    function frame(now: number) {
+    // `step` is elapsed time in 60Hz frames, so every delta below is multiplied
+    // by it: the bubbles rise at one speed regardless of refresh rate.
+    function frame(step: number, now: number) {
       if (!ctx) return;
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
@@ -134,15 +144,15 @@ export function Bubbles() {
         const b = bubbles[i];
 
         if (b.popping > 0) {
-          b.popping--;
+          b.popping -= step;
           drawPop(ctx, b);
-          if (b.popping === 0) bubbles.splice(i, 1);
+          if (b.popping <= 0) bubbles.splice(i, 1);
           continue;
         }
 
-        b.y -= b.speed;
-        b.phase += 0.04;
-        b.x += Math.sin(b.phase) * b.drift;
+        b.y -= b.speed * step;
+        b.phase += 0.04 * step;
+        b.x += Math.sin(b.phase) * b.drift * step;
 
         if (b.y < -20) {
           bubbles.splice(i, 1);
@@ -150,19 +160,17 @@ export function Bubbles() {
         }
         drawBubble(ctx, b);
       }
-
-      raf = requestAnimationFrame(frame);
     }
 
     if (reduced) {
       // Still drawn, just not moving — they remain poppable.
       for (const b of bubbles) drawBubble(ctx, b);
     } else {
-      raf = requestAnimationFrame(frame);
+      stop = animate(frame);
     }
 
     return () => {
-      cancelAnimationFrame(raf);
+      stop?.();
       window.removeEventListener("resize", resize);
       window.removeEventListener("mousedown", onPointerDown, true);
     };
@@ -244,10 +252,10 @@ function drawBubble(ctx: CanvasRenderingContext2D, b: Bubble) {
 function drawPop(ctx: CanvasRenderingContext2D, b: Bubble) {
   const cx = Math.round(b.x / PIXEL) * PIXEL;
   const cy = Math.round(b.y / PIXEL) * PIXEL;
-  const age = 6 - b.popping;
+  const age = POP_FRAMES - b.popping;
   const spread = (b.r + age) * PIXEL;
 
-  ctx.fillStyle = `rgba(210, 250, 255, ${b.popping / 8})`;
+  ctx.fillStyle = `rgba(210, 250, 255, ${b.popping / (POP_FRAMES + 2)})`;
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2;
     ctx.fillRect(

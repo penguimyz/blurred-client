@@ -220,10 +220,77 @@ export interface UpdateStatus {
   updateAvailable: boolean;
   url: string | null;
   notes: string | null;
+  /** The release asset that would be installed here, if there is one. */
+  assetName: string | null;
+  assetSize: number | null;
+  /** Whether `installLauncherUpdate` can do the install on this platform. */
+  canInstall: boolean;
 }
 
 export function checkLauncherUpdate(): Promise<UpdateStatus> {
   return invoke("check_launcher_update");
+}
+
+/**
+ * Download the newest release and hand it to the platform's installer.
+ *
+ * On every platform but the .deb/.rpm handoff this quits the launcher — the
+ * installer cannot overwrite a running executable — so treat a resolved promise
+ * as "we are about to disappear", not as "done".
+ */
+export function installLauncherUpdate(): Promise<void> {
+  return invoke("install_launcher_update");
+}
+
+export interface UpdateProgress {
+  phase: "download" | "install";
+  done: number;
+  total: number;
+  asset: string | null;
+}
+
+export function onUpdateProgress(cb: (p: UpdateProgress) => void): Promise<UnlistenFn> {
+  return listen<UpdateProgress>("update-progress", (e) => cb(e.payload));
+}
+
+// ---- Skins (local library; wearing one goes through set_account_skin_file) --
+
+export interface Skin {
+  id: string;
+  name: string;
+  createdAt: string;
+  variant: string;
+  /** Absolute path to the PNG, for `setAccountSkinFile`. */
+  path: string;
+}
+
+export function listSkins(): Promise<Skin[]> {
+  return invoke("list_skins");
+}
+
+export function saveSkin(name: string, variant: string, data: string): Promise<Skin[]> {
+  return invoke("save_skin", { name, variant, data });
+}
+
+export function updateSkin(id: string, variant: string, data: string): Promise<Skin[]> {
+  return invoke("update_skin", { id, variant, data });
+}
+
+export function renameSkin(id: string, name: string): Promise<Skin[]> {
+  return invoke("rename_skin", { id, name });
+}
+
+export function deleteSkin(id: string): Promise<Skin[]> {
+  return invoke("delete_skin", { id });
+}
+
+export function readSkin(id: string): Promise<string> {
+  return invoke("read_skin", { id });
+}
+
+/** Minecraft versions from Mojang's manifest, newest first. */
+export function listMcVersions(includeSnapshots = false): Promise<string[]> {
+  return invoke("list_mc_versions", { includeSnapshots });
 }
 
 export function revealPath(path: string): Promise<void> {
@@ -352,6 +419,18 @@ export function chatNames(channel: string): Promise<void> {
   return invoke("chat_names", { channel });
 }
 
+/**
+ * The address of whatever world or server the game is currently on.
+ *
+ * Reported by the in-game mod: a multiplayer server as soon as you join, and a
+ * singleplayer world once you Open to LAN. Null when the game isn't running,
+ * the mod isn't installed, or you're in a world that hasn't been opened — the
+ * three cases where there is genuinely nothing to invite anyone to.
+ */
+export function currentServer(): Promise<string | null> {
+  return invoke("current_server");
+}
+
 export function listFriends(): Promise<Friend[]> {
   return invoke("list_friends");
 }
@@ -431,6 +510,17 @@ export function startServer(id: string): Promise<void> {
 }
 
 /** Clean shutdown via the console `stop` command, so the world is saved. */
+/**
+ * Stop a server and bring it back up.
+ *
+ * Resolves as soon as the stop command is sent, not when it's back — the
+ * restart happens once the JVM has actually exited. Watch `onServerStopped`
+ * and `onServerReady` for the two ends of it.
+ */
+export function restartServer(id: string): Promise<void> {
+  return invoke("restart_server", { id });
+}
+
 export function stopServer(id: string): Promise<void> {
   return invoke("stop_server", { id });
 }

@@ -3,7 +3,8 @@ import { useChatStore } from "../store/chatStore";
 import { useAccountStore } from "../store/accountStore";
 import { Icon } from "../components/Icon";
 import { navLabel } from "../lib/nav";
-import type { ChatMessage } from "../types/chat";
+import { currentServer } from "../lib/tauri";
+import type { ChatMessage, Friend } from "../types/chat";
 
 /**
  * Sonar — the chat screen.
@@ -57,6 +58,46 @@ export function Chat() {
     wire();
     refreshFriends();
   }, [wire, refreshFriends]);
+
+  // Where you're playing, for the invite controls below. Polled rather than
+  // pushed: it changes when the game joins a server or a world is opened to
+  // LAN, neither of which the launcher is told about directly — the mod reports
+  // it over the bridge and the launcher just holds the latest value.
+  const [world, setWorld] = useState<string | null>(null);
+  useEffect(() => {
+    let stopped = false;
+    const read = () =>
+      currentServer()
+        .then((s) => !stopped && setWorld(s && s.trim() ? s : null))
+        .catch(() => {});
+    read();
+    const timer = window.setInterval(read, 5000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  /**
+   * Send someone the address of the world you're in.
+   *
+   * A plain DM, not a new protocol. It lands in their Sonar transcript and — if
+   * they're in the game — in the crew panel's, where the address is already
+   * clickable because the mod offers a join for any crew member's server. The
+   * value here is the nudge: presence tells them you're *somewhere*, an invite
+   * tells them you want them there.
+   */
+  function invite(nick: string) {
+    if (!world) return;
+    send(nick, `Come and play — join me at ${world}`).catch(() => {});
+  }
+
+  function inviteAllOnline() {
+    if (!world) return;
+    for (const f of crew()) {
+      if (f.online) invite(f.nick);
+    }
+  }
 
   const active = activeKey ? conversations[activeKey] : undefined;
   const channels = Object.values(conversations).filter((c) => c.isChannel);
@@ -184,42 +225,27 @@ export function Chat() {
         )}
 
         <SectionHeader label="Crew" actionLabel="Send a friend request" onAction={() => setShowAddFriend(true)} />
+
+        {/* Inviting people to your world belongs here, next to the people. It
+            used to live nowhere: the mod shared your address with the crew
+            automatically, so a friend could see you were somewhere and join —
+            but there was no way to actually *ask* anyone. */}
+        <WorldInvite world={world} onInviteAll={inviteAllOnline} anyOnline={crew().some((f) => f.online)} />
+
         {crew().length === 0 && <Empty text="Nobody on your crew yet." />}
         {crew().map((f) => (
-          <div key={f.nick} style={{ display: "flex", alignItems: "center" }}>
-            <button
-              className="chat-entry"
-              onClick={() => openConversation(f.nick)}
-              title={f.note || undefined}
-            >
-              <span className={`presence ${f.online ? "online" : ""}`} />
-              <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {f.nick}
-              </span>
-              <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
-                {f.online ? "up" : "down"}
-              </span>
-            </button>
-            <button
-              className="bare"
-              onClick={() => {
-                if (confirm(`Remove ${f.nick} from your crew?`)) {
-                  removeFriend(f.nick).catch(() => {});
-                }
-              }}
-              title={`Remove ${f.nick} from your crew`}
-              style={{
-                background: "transparent",
-                border: "none",
-                color: "var(--text-tertiary)",
-                cursor: "pointer",
-                padding: 4,
-                display: "flex",
-              }}
-            >
-              <Icon name="close" size={13} />
-            </button>
-          </div>
+          <CrewRow
+            key={f.nick}
+            friend={f}
+            world={world}
+            onOpen={() => openConversation(f.nick)}
+            onInvite={() => invite(f.nick)}
+            onRemove={() => {
+              if (confirm(`Remove ${f.nick} from your crew?`)) {
+                removeFriend(f.nick).catch(() => {});
+              }
+            }}
+          />
         ))}
 
         {/* Sent requests. Worth showing because there's a real chance one is
@@ -612,6 +638,173 @@ function SectionHeader({
           <Icon name="plus" size={14} />
         </button>
       )}
+    </div>
+  );
+}
+
+/**
+ * The strip above the crew list: where you're playing, and one button to ask
+ * everyone over.
+ *
+ * Present in all three states rather than appearing only when there's something
+ * to invite people to — the states are the explanation. "Open your world to
+ * LAN" is the instruction someone needs at exactly the moment they went looking
+ * for an invite button and expected it to work.
+ */
+function WorldInvite({
+  world,
+  anyOnline,
+  onInviteAll,
+}: {
+  world: string | null;
+  anyOnline: boolean;
+  onInviteAll: () => void;
+}) {
+  return (
+    <div
+      style={{
+        margin: "2px 10px 8px",
+        padding: "8px 10px",
+        border: `1px solid ${world ? "var(--accent)" : "var(--glass-border)"}`,
+        background: world ? "rgba(53,224,208,0.07)" : "transparent",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+        <Icon name="globe" size={12} />
+        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)" }}>
+          Your world
+        </span>
+      </div>
+
+      {world ? (
+        <>
+          <div
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-secondary)",
+              wordBreak: "break-all",
+              marginBottom: 7,
+            }}
+          >
+            {world}
+          </div>
+          <button
+            className="accent"
+            onClick={onInviteAll}
+            disabled={!anyOnline}
+            title={
+              anyOnline
+                ? "Send everyone online the address"
+                : "Nobody on your crew is online right now"
+            }
+            style={{ width: "100%", fontSize: 11, padding: "5px 8px" }}
+          >
+            Invite everyone online
+          </button>
+        </>
+      ) : (
+        <div style={{ fontSize: 10.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+          Start a world and use Open to LAN — or join a server — and the address
+          shows here for you to invite crew to.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One crew member: presence, where they're playing, and the two things you'd
+ * want to do about it.
+ *
+ * The invite button is disabled rather than hidden when there's nowhere to
+ * invite them to. A control that vanishes teaches nothing; one that's greyed
+ * out with a reason on hover teaches what to do about it.
+ */
+function CrewRow({
+  friend,
+  world,
+  onOpen,
+  onInvite,
+  onRemove,
+}: {
+  friend: Friend;
+  world: string | null;
+  onOpen: () => void;
+  onInvite: () => void;
+  onRemove: () => void;
+}) {
+  const canInvite = !!world && friend.online;
+
+  return (
+    <div style={{ display: "flex", alignItems: "center" }}>
+      <button className="chat-entry" onClick={onOpen} title={friend.note || undefined}>
+        <span className={`presence ${friend.online ? "online" : ""}`} />
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+          <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
+            {friend.nick}
+          </span>
+          {friend.server && (
+            <span
+              style={{
+                display: "block",
+                fontSize: 9.5,
+                color: "var(--text-tertiary)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              on {friend.server}
+            </span>
+          )}
+        </span>
+        {!friend.server && (
+          <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>
+            {friend.online ? "up" : "down"}
+          </span>
+        )}
+      </button>
+
+      <button
+        className="bare"
+        onClick={onInvite}
+        disabled={!canInvite}
+        title={
+          !world
+            ? "You're not in a world others can join — open one to LAN first"
+            : !friend.online
+              ? `${friend.nick} is offline`
+              : `Invite ${friend.nick} to ${world}`
+        }
+        aria-label={`Invite ${friend.nick} to your world`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: canInvite ? "var(--accent)" : "var(--text-tertiary)",
+          cursor: canInvite ? "pointer" : "default",
+          opacity: canInvite ? 1 : 0.4,
+          padding: 4,
+          display: "flex",
+        }}
+      >
+        <Icon name="send" size={13} />
+      </button>
+
+      <button
+        className="bare"
+        onClick={onRemove}
+        title={`Remove ${friend.nick} from your crew`}
+        style={{
+          background: "transparent",
+          border: "none",
+          color: "var(--text-tertiary)",
+          cursor: "pointer",
+          padding: 4,
+          display: "flex",
+        }}
+      >
+        <Icon name="close" size={13} />
+      </button>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Instance } from "../../types/instance";
 import { getInstance } from "../../lib/tauri";
 import { useInstanceStore } from "../../store/instanceStore";
+import { useForceQuit } from "../../components/ForceQuitConfirm";
 import { OverviewTab } from "./OverviewTab";
 import { ModsTab } from "./ModsTab";
 import { ConfigsTab } from "./ConfigsTab";
@@ -37,8 +38,10 @@ export function InstanceDetail({ instanceId, onBack }: { instanceId: string; onB
   const [instance, setInstance] = useState<Instance | null>(null);
   const [tab, setTab] = useState("overview");
   const [error, setError] = useState<string | null>(null);
-  const { running, launch, quit, refreshRunning } = useInstanceStore();
+  const { running, launch, refreshRunning } = useInstanceStore();
   const isRunning = !!running[instanceId];
+  // Quit force-kills the game, so it confirms first. See ForceQuitConfirm.
+  const { requestQuit, dialog: forceQuitDialog } = useForceQuit();
 
   useEffect(() => {
     getInstance(instanceId).then(setInstance).catch((e) => setError(String(e)));
@@ -77,7 +80,7 @@ export function InstanceDetail({ instanceId, onBack }: { instanceId: string; onB
           {isRunning ? (
             <button
               style={{ padding: "10px 28px", fontSize: 14, background: "var(--danger)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", fontWeight: 600, cursor: "pointer" }}
-              onClick={() => quit(instance.id).catch((e) => setError(String(e)))}
+              onClick={() => requestQuit(instance.id, instance.name)}
             >
               ■ Quit
             </button>
@@ -127,6 +130,8 @@ export function InstanceDetail({ instanceId, onBack }: { instanceId: string; onB
         {tab === "logs" && <LogsTab instance={instance} setInstance={setInstance} />}
         {tab === "notes" && <NotesTab instance={instance} setInstance={setInstance} />}
       </div>
+
+      {forceQuitDialog}
     </div>
   );
 }

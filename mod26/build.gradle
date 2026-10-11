@@ -1,0 +1,56 @@
+plugins {
+    // The new plugin id. `fabric-loom` still resolves for the 1.21.x tree; the
+    // 26.x toolchain uses the fully-qualified one, as Fabric's own 26.2
+    // template does.
+    id 'net.fabricmc.fabric-loom' version '1.17.19'
+}
+
+version = "${project.mod_version}+mc${project.minecraft_version}"
+group = project.maven_group
+
+base {
+    // Same naming as the Stonecutter tree's jars, so the launcher's
+    // `blurred-<mcVersion>.jar` lookup finds this one too without a special case.
+    archivesName = "${project.archives_base_name}-${project.minecraft_version}"
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+
+    /*
+      No `mappings` line, and that is not an omission.
+
+      26.x ships unobfuscated, so Mojang publishes no ProGuard mapping file for
+      it and `loom.officialMojangMappings()` fails outright with "Failed to find
+      official mojang mappings for 26.2". There is nothing to map: the class
+      names in the jar are the names you write.
+
+      For the same reason these are `implementation` rather than
+      `modImplementation` — with nothing to deobfuscate there is no remapping
+      step for a mod dependency to go through. Fabric's own 26.2 example mod is
+      written exactly this way.
+    */
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'mcVersion', project.minecraft_version
+    filesMatching('fabric.mod.json') {
+        expand version: project.version, mcVersion: project.minecraft_version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    // 26.2 requires Java 25 — Loom refuses to configure on anything lower, and
+    // the game won't load a class file it can't read. The 1.21.x tree next door
+    // is still on 21.
+    it.options.release = 25
+    it.options.encoding = 'UTF-8'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+}

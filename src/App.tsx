@@ -6,6 +6,7 @@ import { FishSchool } from "./components/FishSchool";
 import { SeaLife } from "./components/SeaLife";
 import { Bubbles } from "./components/Bubbles";
 import { JavaBanner } from "./components/JavaBanner";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { Servers } from "./pages/Servers";
 import { Home } from "./pages/Home";
 import { Browse } from "./pages/Browse";
@@ -32,6 +33,7 @@ export default function App() {
   const { accounts, loaded, refresh } = useAccountStore();
   const refreshSettings = useSettingsStore((s) => s.refresh);
   const settings = useSettingsStore((s) => s.settings);
+  const ocean = settings?.uiStyle !== "modern";
   const { wire, connect, connected, connecting } = useChatStore();
 
   useEffect(() => {
@@ -113,13 +115,18 @@ export default function App() {
           creatures, then bubbles, and every panel in front of the lot. The
           cursor school is the exception: it tracks the pointer, so it stays on
           top where you can see it. */}
-      {settings?.seaLifeEnabled && <SeaLife />}
-      {settings?.seaLifeEnabled && <Bubbles />}
-      {settings?.fishEnabled && <FishSchool />}
+      {/* Sea life belongs to the Ocean style; Modern is a plain dark backdrop. */}
+      {ocean && settings?.seaLifeEnabled && <SeaLife />}
+      {ocean && settings?.seaLifeEnabled && <Bubbles />}
+      {ocean && settings?.fishEnabled && <FishSchool />}
       <TitleBar />
       {/* App-wide: launching an instance and starting a server can both
           trigger a Java download. */}
       <JavaBanner />
+      {/* Checks for a newer release on startup and installs it. Mounted here
+          rather than behind the login gate — an update shouldn't wait on
+          somebody signing in. */}
+      <UpdateBanner />
       {content}
     </>
   );

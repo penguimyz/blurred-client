@@ -399,6 +399,14 @@ pub async fn launch_instance(
             jvm_args.push(format!("-Dblurred.bridge.port={port}"));
             jvm_args.push(format!("-Dblurred.bridge.token={}", state.bridge.token));
         }
+
+        // Discord rich presence is set up once in the launcher, not per
+        // instance — the mod reads this property and falls back to its own
+        // config only if someone has deliberately overridden it there.
+        let discord = state.settings.lock().unwrap().discord_app_id.trim().to_string();
+        if !discord.is_empty() {
+            jvm_args.push(format!("-Dblurred.discord.appId={discord}"));
+        }
     }
 
     jvm_args.push("-cp".to_string());

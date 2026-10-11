@@ -18,3 +18,12 @@ and a strict CSP would block the request anyway. Both weights together are
 To update: pull the `woff2` URLs from the Google Fonts `css2` endpoint **with a
 modern browser User-Agent** — with a default curl UA it serves TTF instead,
 which is roughly three times the size.
+
+## Varela Round
+
+The UI face of the Modern style, the same font the mod's Modern menus use
+(copied from `mod/src/main/resources/assets/blurred/font/`).
+
+- Designer: Joe Prince
+- Source: https://fonts.google.com/specimen/Varela+Round
+- License: SIL Open Font License 1.1 (see `VarelaRound-OFL.txt`)

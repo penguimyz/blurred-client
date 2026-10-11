@@ -14,12 +14,54 @@ import type { CrashReport } from "../types/crash";
  * memory-only, so before crash reports existed, restarting the launcher threw
  * away the one thing you needed to read.
  *
- * Dismissing is per-session and does not delete the report; the Logs page keeps
- * the full list.
+ * Dismissing does not delete the report — the Logs page keeps the full list —
+ * but it does stick. See {@link isDismissed}.
  */
+
+/**
+ * Crash reports the user has waved away, by id.
+ *
+ * Dismissal used to be component state, which meant it lasted until the next
+ * time the Launchpad mounted — so clicking the X, going to Settings and coming
+ * back brought the banner straight back, and it returned on every restart for a
+ * day. The only thing that actually made it go away was deleting the report on
+ * the Logs page, which is a destructive action to be pushed into for what
+ * should be "yes, I've seen this".
+ *
+ * localStorage rather than a module variable, because "I've seen this crash" is
+ * true tomorrow as well. The ids are tiny and the list is capped; the reports
+ * themselves are untouched.
+ */
+const DISMISSED_KEY = "blurred.dismissedCrashes";
+const DISMISSED_CAP = 50;
+
+function dismissedIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(DISMISSED_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === "string") : [];
+  } catch {
+    // A corrupt or unavailable store must not stop the banner working; the
+    // worst case is that a dismissal doesn't stick, which is where we started.
+    return [];
+  }
+}
+
+function isDismissed(id: string): boolean {
+  return dismissedIds().includes(id);
+}
+
+function rememberDismissed(id: string): void {
+  try {
+    const next = [id, ...dismissedIds().filter((v) => v !== id)].slice(0, DISMISSED_CAP);
+    window.localStorage.setItem(DISMISSED_KEY, JSON.stringify(next));
+  } catch {
+    /* non-fatal, as above */
+  }
+}
+
 export function CrashBanner({ onOpenInstance }: { onOpenInstance: (id: string) => void }) {
   const [report, setReport] = useState<CrashReport | null>(null);
-  const [dismissed, setDismissed] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
@@ -34,14 +76,16 @@ export function CrashBanner({ onOpenInstance }: { onOpenInstance: (id: string) =
         // with shouldn't greet you every launch — it stays on the Logs page.
         const newest = reports[0];
         const ageMs = Date.now() - new Date(newest.occurredAt).getTime();
-        if (ageMs < 24 * 60 * 60 * 1000) setReport(newest);
+        if (ageMs < 24 * 60 * 60 * 1000 && !isDismissed(newest.id)) setReport(newest);
       })
       .catch(() => {});
 
     api
       .onInstanceCrashed((r) => {
+        // A crash that just happened is always worth showing, even if an
+        // earlier one was dismissed — this is a different report with a
+        // different id.
         setReport(r);
-        setDismissed(false);
         setExpanded(false);
       })
       .then((fn) => {
@@ -55,7 +99,7 @@ export function CrashBanner({ onOpenInstance }: { onOpenInstance: (id: string) =
     };
   }, []);
 
-  if (!report || dismissed) return null;
+  if (!report) return null;
 
   return (
     <div
@@ -114,8 +158,11 @@ export function CrashBanner({ onOpenInstance }: { onOpenInstance: (id: string) =
 
         <button
           className="bare"
-          onClick={() => setDismissed(true)}
-          title="Dismiss"
+          onClick={() => {
+            rememberDismissed(report.id);
+            setReport(null);
+          }}
+          title="Dismiss — the report stays on the Logs page"
           aria-label="Dismiss"
           style={{
             background: "transparent",

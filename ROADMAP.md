@@ -196,7 +196,7 @@ contracts but NOT live-tested from the sandbox.
 servers. Microsoft accounts can join online servers and Realms.
 
 ## Phase 7 — Logs viewer, playtime tracking, auto-update
-**Status: done (silent launcher auto-install is the only infra piece left).**
+**Status: done.**
 - [x] Log event pipe (`instance-log` Tauri event, `onInstanceLog` in
       `src/lib/tauri.ts`)
 - [x] Playtime accumulation (`total_playtime_seconds` updated on process exit)
@@ -209,11 +209,18 @@ servers. Microsoft accounts can join online servers and Realms.
       loader; `update_mod` / `update_all_mods` swap the jar and update the
       ModRef, preserving enabled/pinned state. Surfaced in the Mods tab
       ("Check for updates" / per-row "Update" / "Update all"), respecting pins.
-- [x] Launcher self-update (check) — `check_launcher_update` queries the
-      configured GitHub repo's latest release (`update_repo` setting) and reports
-      whether a newer version is out, surfaced in Settings. Silent auto-install
-      (updater plugin + signed releases + hosted feed) is the remaining infra
-      piece — that needs published, signed releases to exist first.
+- [x] Launcher self-update (check **and install**) — `check_launcher_update`
+      queries the configured GitHub repo's latest release (`update_repo`,
+      defaulting to `penguimyz/blurred-client`) and reports whether a newer
+      version is out. `install_launcher_update` then downloads the release asset
+      for this platform (NSIS setup .exe on Windows; AppImage self-swap, or
+      .deb/.rpm handed to the desktop's installer, on Linux), runs it, and exits
+      so it can replace the running binary. `UpdateBanner` does this
+      automatically on startup after a cancellable countdown, and stands down
+      while a game or server is running — the same hazard `QuitConfirm` warns
+      about. The old note here said this needed the updater plugin and signed
+      releases; that's true of *that* flow, not of running the installer CI
+      already publishes.
 
 ## Phase 8 — Ocean theme, chat, crash reports
 - [x] **Ocean/submarine visual identity.** `styles/theme.css` rebuilt around a
@@ -300,6 +307,9 @@ version-locked, so moving Minecraft means moving `yarn_mappings` and
 - [x] **HUD** — porthole watermark, FPS (smoothed), coordinates, facing, ping
       and CPS, drawn with primitives in the launcher's palette (`Theme.java`
       mirrors `theme.css`). Hides with F1 like the rest of the game's chrome.
+      CPS is fed by `MouseClickMixin` on `Mouse.onMouseButton`; it shipped
+      without one, so the readout sat at `0/0` however fast anyone clicked.
+      Polling per tick can't replace it — 20Hz cannot see 20+ CPS.
 - [x] **Launcher bridge** — `commands/bridge.rs` ↔ `LauncherBridge.java`.
       Newline-delimited JSON over a **loopback-only** socket, guarded by a
       per-run token the launcher passes as a JVM `-D` property, so only a
@@ -310,6 +320,26 @@ version-locked, so moving Minecraft means moving `yarn_mappings` and
       presence, transcript, composer. Doesn't pause singleplayer.
 - [x] **Join a friend** — the mod reports its current server on change, the
       launcher records it, and a joinable crew member can be clicked to connect.
+      The launcher's own crew list (Sonar) has the other direction: an invite
+      button per friend that DMs them the address of whatever world you're in,
+      plus "invite everyone online" (`currentServer` + `WorldInvite`).
+- [x] **Talk to players who aren't on Blurred** — `CrewScreen`'s PLAYERS tab
+      lists the server's tab list, marks who's also on Blurred, and messages
+      anyone else through the server's own `/msg` (`Whispers`). This is as far
+      as Essential interop can honestly go: they publish no API, so the shared
+      server is the only channel both clients understand. Replies land in the
+      game's chat box rather than being mirrored back — capturing them means
+      matching a translation key every chat plugin reformats, and a transcript
+      with holes is worse than no transcript.
+- [x] **Discord rich presence** (`DiscordPresence`) — "Blurred Client — On the
+      main menu / In a singleplayer world / On a server", over Discord's local
+      IPC socket, hand-written rather than pulling in an RPC SDK with a native
+      blob. Runs out of the box: the launcher ships Blurred's registered
+      application ID (`1535178618907664494`) and passes it to every instance as
+      `-Dblurred.discord.appId`. It has to be a *specific* application rather
+      than a generic identifier, because Discord takes the status's bold first
+      line from that application's name — which is also what makes pointing
+      Settings → Discord status at your own app rename the status.
 - [x] **Auto-install** — the jar ships as a Tauri resource and is synced into
       every Fabric/Quilt instance on launch (and removed from instances whose
       loader can't use it). Byte-compared first, so launching doesn't rewrite it
@@ -319,9 +349,10 @@ version-locked, so moving Minecraft means moving `yarn_mappings` and
       cheat, which is exactly what a client-branded mod poking at gameplay would
       risk.
 
-**Still out:** pre-1.7 "virtual" assets, silent launcher auto-install (needs
-signed release infra), Forge/NeoForge launch (selectable, installer pipeline not
-built), and SASL/registered-nick support for chat.
+**Still out:** pre-1.7 "virtual" assets, Forge/NeoForge launch (selectable,
+installer pipeline not built), and SASL/registered-nick support for chat.
+Launcher auto-install is no longer on this list — it runs the release installer
+rather than applying a signed delta, which needs no new infrastructure (Phase 7).
 
 ## Phase 10 — Pixel-art restyle
 The ocean palette is unchanged; what changed is the *grammar* around it.

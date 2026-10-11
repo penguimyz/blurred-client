@@ -58,6 +58,27 @@ impl AppState {
             if s.accent_color.eq_ignore_ascii_case(crate::models::settings::LEGACY_DEFAULT_ACCENT) {
                 s.accent_color = crate::models::settings::DEFAULT_ACCENT.to_string();
             }
+            // Point existing installs at the release repo. It shipped
+            // defaulting to empty, which reads as "updates off" — but nobody
+            // chose that, it was the field's initial value, and the effect is
+            // an install that can never tell you a fix exists.
+            //
+            // `#[serde(default)]` cannot do this: the key *is* present in the
+            // file, so the default never runs. It has to be a migration, and a
+            // migration on "is it empty" would fire every launch and stomp on
+            // anyone who cleared the box on purpose. The tell for "this file
+            // predates the change" is the sibling field added alongside it —
+            // if `autoInstallUpdates` is absent, the file was written before
+            // any of this existed, and an empty repo there is a default rather
+            // than a decision. After the first save the key exists and this
+            // never runs again.
+            let migrated_before = serde_json::from_str::<serde_json::Value>(&raw)
+                .ok()
+                .and_then(|v| v.get("autoInstallUpdates").cloned())
+                .is_some();
+            if !migrated_before && s.update_repo.trim().is_empty() {
+                s.update_repo = crate::models::settings::default_update_repo();
+            }
             s
         } else {
             let s = GlobalSettings {

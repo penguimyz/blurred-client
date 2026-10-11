@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import type { TabProps } from "./InstanceDetail";
 import { onInstanceLog } from "../../lib/tauri";
+import { openLogWindow } from "../../lib/logWindow";
 
 // Live log viewer (Phase 7 / spec §6). Hangs off the existing `instance-log`
 // event pipe — the same stream playtime tracking uses — so it just renders,
@@ -86,6 +87,18 @@ export function LogsTab({ instance }: TabProps) {
         </button>
         <button onClick={() => setLines([])} style={ghostBtn}>
           Clear
+        </button>
+        <button
+          onClick={() =>
+            void openLogWindow({
+              instanceId: instance.id,
+              title: `${instance.name} — log`,
+            }).catch(() => {})
+          }
+          style={ghostBtn}
+          title="Watch this log in its own window, beside the launcher or over the game"
+        >
+          Pop out
         </button>
       </div>
 

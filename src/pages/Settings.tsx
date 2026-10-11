@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { GlobalSettings, Theme } from "../types/settings";
-import { useSettingsStore, applyTheme, applyAccent } from "../store/settingsStore";
+import type { GlobalSettings, Theme, UiStyle } from "../types/settings";
+import { useSettingsStore, applyTheme, applyAccent, applyStyle } from "../store/settingsStore";
 import { GlassCard } from "../components/GlassCard";
 import { PageHeader } from "../components/PageHeader";
 import { MonoField } from "../components/MonoField";
@@ -16,9 +16,18 @@ import { checkLauncherUpdate, type UpdateStatus } from "../lib/tauri";
 // re-tints under your cursor; Save persists.
 
 const THEMES: Theme[] = ["dark", "light", "system"];
+// The same looks as the mod's menus: Ocean is the pixel-art water, Modern the
+// mod's flat dark style with its blue accent.
+const STYLES: { value: UiStyle; label: string }[] = [
+  { value: "ocean", label: "Ocean" },
+  { value: "modern", label: "Modern" },
+];
+// Each style's own accent. Switching style swaps the accent too, unless you'd
+// picked one of your own.
+const STYLE_ACCENT: Record<UiStyle, string> = { ocean: "#35e0d0", modern: "#26b4e6" };
 // Reordered for the ocean palette: the bioluminescent cyan default first, then
 // the rest of the reef. The old purple stays available, just not first.
-const ACCENT_SWATCHES = ["#35e0d0", "#22d3ee", "#38bdf8", "#34d399", "#a78bfa", "#fb7185", "#fbbf24"];
+const ACCENT_SWATCHES = ["#35e0d0", "#26b4e6", "#22d3ee", "#38bdf8", "#34d399", "#a78bfa", "#fb7185", "#fbbf24"];
 
 export function Settings() {
   const { settings, refresh, save } = useSettingsStore();
@@ -43,7 +52,16 @@ export function Settings() {
     setDraft(next);
     // Live-preview appearance changes without waiting for Save.
     if (k === "theme") applyTheme(v as Theme);
+    if (k === "uiStyle") applyStyle(v as UiStyle);
     if (k === "accentColor") applyAccent(v as string);
+  };
+
+  const setStyle = (style: UiStyle) => {
+    const ownAccent = !Object.values(STYLE_ACCENT).includes(draft.accentColor.toLowerCase());
+    const next = { ...draft, uiStyle: style, accentColor: ownAccent ? draft.accentColor : STYLE_ACCENT[style] };
+    setDraft(next);
+    applyStyle(style);
+    applyAccent(next.accentColor);
   };
 
   const dirty = settings ? JSON.stringify(draft) !== JSON.stringify(settings) : true;
@@ -71,6 +89,24 @@ export function Settings() {
         <GlassCard>
           <h3 style={{ margin: "0 0 16px", fontSize: 14 }}>Appearance</h3>
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Style</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {STYLES.map((st) => (
+                  <button
+                    key={st.value}
+                    onClick={() => setStyle(st.value)}
+                    style={{
+                      ...pill,
+                      background: (draft.uiStyle ?? "ocean") === st.value ? "var(--accent)" : "transparent",
+                      color: (draft.uiStyle ?? "ocean") === st.value ? "var(--accent-fg)" : "var(--text-secondary)",
+                    }}
+                  >
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <div>
               <label style={labelStyle}>Theme</label>
               <div style={{ display: "flex", gap: 8 }}>
@@ -201,9 +237,16 @@ export function Settings() {
                 </div>
               )}
               <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
-                Checks GitHub releases for a newer version. Auto-install isn't wired (needs signed releases) — this notifies only.
+                Checks this repo's GitHub releases for a newer version. Clear the box to switch update
+                checks off entirely.
               </div>
             </div>
+            <Toggle
+              checked={draft.autoInstallUpdates}
+              onChange={(v) => set("autoInstallUpdates", v)}
+              title="Install updates automatically"
+              hint="On startup, download the new release and run its installer, then reopen on the new version. Held back while a game or server is running — quitting the launcher then can corrupt a world. Off means you'll just be told an update exists."
+            />
           </div>
         </GlassCard>
 
@@ -257,6 +300,52 @@ export function Settings() {
             title="Connect automatically"
             hint="Join chat as soon as the launcher opens."
           />
+        </GlassCard>
+
+        <GlassCard>
+          <h3 style={{ margin: "0 0 6px", fontSize: 14 }}>Discord status</h3>
+          <p style={{ margin: "0 0 16px", fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.55 }}>
+            Shows <em>Blurred Client — On the main menu / In a singleplayer world / On a server</em> on
+            your Discord profile while you play. Set up already — the ID below is Blurred's own
+            Discord application, which is where the bold "Blurred Client" line comes from. Swap it
+            for your own from{" "}
+            <a
+              href="https://discord.com/developers/applications"
+              target="_blank"
+              rel="noreferrer"
+              style={{ color: "var(--accent)" }}
+            >
+              discord.com/developers/applications ↗
+            </a>{" "}
+            if you'd rather the status read something else — Discord uses that application's name
+            verbatim. Clear it to switch the status off.
+          </p>
+          <div>
+            <label style={labelStyle}>Discord application ID</label>
+            <input
+              value={draft.discordAppId}
+              onChange={(e) => set("discordAppId", e.target.value)}
+              placeholder="blank = no Discord status"
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 4 }}>
+              Applies to every instance from its next launch. The in-game Settings screen has the
+              on/off switch and the choice of whether the server address is shown.
+            </div>
+          </div>
+
+          <div style={{ marginTop: 14 }}>
+            <Toggle
+              checked={draft.discordLauncherPresence}
+              onChange={(v) => set("discordLauncherPresence", v)}
+              title="Show a status while you're in the launcher"
+              hint={
+                "Says “In the launcher” when the launcher is open and no game is running. " +
+                "It stands down as soon as you press Play — Discord only shows one status per app, " +
+                "so the in-game one takes over rather than the two fighting."
+              }
+            />
+          </div>
         </GlassCard>
 
         <GlassCard>

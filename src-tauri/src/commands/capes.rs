@@ -28,7 +28,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use crate::state::AppState;
 use crate::util;
@@ -224,6 +224,105 @@ pub fn apply_active_cape(
 /// The cape library on disk, for the in-game picker.
 pub fn library(data_dir: &Path) -> Vec<Cape> {
     load_index(data_dir)
+}
+
+// ---------------------------------------------------------------------------
+// Built-in capes
+// ---------------------------------------------------------------------------
+
+/// Capes that ship with the launcher, as (library name, resource filename).
+///
+/// Adding one means an entry here, the PNG under `resources/capes/`, and that
+/// glob in `tauri.conf.json`'s `bundle.resources`. The marker is per-cape, so
+/// one added later still reaches installs that have already run — and note that
+/// an empty glob makes the Tauri build fail outright, so the two move together.
+const BUILTIN_CAPES: &[(&str, &str)] = &[("Blurred", "blurred.png")];
+
+/// Records which built-ins have been offered, one name per line.
+///
+/// Per-cape rather than a single "seeded" flag, because a flag written today
+/// would lock out anything added tomorrow: every existing install would already
+/// be marked done and would never see the new cape.
+const SEEDED_MARKER: &str = ".builtins";
+
+/// Copy the shipped capes into the user's library, once.
+///
+/// # Why once, and not "whenever they're missing"
+///
+/// Re-adding anything the user doesn't have would mean a cape they deleted
+/// coming back on every launch, which is the launcher overruling them about
+/// their own cosmetics. The marker file is what makes this a one-time offer:
+/// after the first run the built-in is an ordinary cape in their library, theirs
+/// to rename, edit or throw away.
+///
+/// Existing installs get it on their next launch (they have a library but no
+/// marker), which is the intended behaviour — the point of shipping it is that
+/// everyone has it.
+///
+/// A missing or unreadable resource is not an error worth surfacing: the
+/// launcher works perfectly well without a default cape, and a dialog on
+/// startup about a cosmetic would be far out of proportion.
+pub fn seed_builtins(app: &AppHandle, data_dir: &Path) {
+    if BUILTIN_CAPES.is_empty() {
+        return;
+    }
+
+    let marker = capes_dir(data_dir).join(SEEDED_MARKER);
+    let offered = std::fs::read_to_string(&marker).unwrap_or_default();
+    let already: Vec<&str> = offered.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+
+    let Ok(resources) = app.path().resource_dir() else {
+        return;
+    };
+
+    let mut capes = load_index(data_dir);
+    let mut added = false;
+
+    for (name, file) in BUILTIN_CAPES {
+        if already.contains(name) {
+            continue;
+        }
+        let source = resources.join("resources/capes").join(file);
+        let Ok(bytes) = std::fs::read(&source) else {
+            tracing::warn!("built-in cape {file} is missing from the bundle");
+            continue;
+        };
+
+        // Skip one the user already has — most likely because they made it
+        // themselves before it shipped, and a duplicate row helps nobody.
+        let hash = hash_bytes(&bytes);
+        if capes.iter().any(|c| c.hash == hash) {
+            continue;
+        }
+
+        let id = uuid::Uuid::new_v4().to_string();
+        if std::fs::create_dir_all(capes_dir(data_dir)).is_err() {
+            return;
+        }
+        if std::fs::write(cape_png_path(data_dir, &id), &bytes).is_err() {
+            continue;
+        }
+
+        capes.push(Cape {
+            id,
+            name: name.to_string(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            hash,
+        });
+        added = true;
+        tracing::info!("installed the built-in {name} cape");
+    }
+
+    if added {
+        let _ = save_index(data_dir, &capes);
+    }
+
+    // Record every built-in as offered, including ones skipped because the user
+    // already had them — from here on "they had it" and "they deleted it" are
+    // the same state, which is the point: neither should bring it back.
+    let all: Vec<&str> = BUILTIN_CAPES.iter().map(|(name, _)| *name).collect();
+    let _ = std::fs::create_dir_all(capes_dir(data_dir));
+    let _ = std::fs::write(&marker, all.join("\n"));
 }
 
 /// Which cape is currently worn, by id.

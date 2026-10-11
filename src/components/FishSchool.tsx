@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { animate, decay } from "../lib/animation";
 
 /**
  * A small school of fish that follows the cursor, and circles it once the
@@ -119,12 +120,14 @@ export function FishSchool() {
     window.addEventListener("mousemove", onMove, { passive: true });
     window.addEventListener("resize", resize);
 
-    let raf = 0;
     let t = 0;
 
-    function frame() {
+    // `step` is elapsed time in 60Hz frames. The steering constants below are
+    // all per-frame quantities, so each is scaled by it — velocity and the
+    // orbit phase linearly, drag exponentially (see `decay`).
+    function frame(step: number) {
       if (!ctx || !canvas) return;
-      t += 1;
+      t += step;
       // Clear in CSS pixels: the context carries a dpr transform, so passing
       // the backing-store size here would clear a region dpr times too large.
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
@@ -138,7 +141,7 @@ export function FishSchool() {
         if (idle) {
           // Orbit: advance this fish's angle and aim at the resulting point.
           // Radius breathes a little per fish so the ring isn't a hard circle.
-          f.phase += 0.013;
+          f.phase += 0.013 * step;
           const r = ORBIT_RADIUS + Math.sin(t * 0.02 + f.wobble) * 8 + f.scale * 6;
           tx = cursor.x + Math.cos(f.phase) * r;
           ty = cursor.y + Math.sin(f.phase) * r * 0.62; // squashed = seen at an angle
@@ -148,34 +151,35 @@ export function FishSchool() {
           const spread = 26 + f.scale * 14;
           tx = cursor.x + Math.cos(f.phase) * spread;
           ty = cursor.y + Math.sin(f.phase) * spread;
-          f.phase += 0.004;
+          f.phase += 0.004 * step;
         }
 
         // Steer: nudge velocity toward the target, cap it, then apply drag.
-        f.vx += (tx - f.x) * STEER;
-        f.vy += (ty - f.y) * STEER;
+        f.vx += (tx - f.x) * STEER * step;
+        f.vy += (ty - f.y) * STEER * step;
 
+        // The cap is on velocity, which stays in px-per-60Hz-frame, so it needs
+        // no scaling — the step is applied where velocity becomes position.
         const speed = Math.hypot(f.vx, f.vy);
         if (speed > MAX_SPEED) {
           f.vx = (f.vx / speed) * MAX_SPEED;
           f.vy = (f.vy / speed) * MAX_SPEED;
         }
-        f.vx *= DRAG;
-        f.vy *= DRAG;
+        const drag = decay(DRAG, step);
+        f.vx *= drag;
+        f.vy *= drag;
 
-        f.x += f.vx;
-        f.y += f.vy;
+        f.x += f.vx * step;
+        f.y += f.vy * step;
 
         drawFish(ctx, f, t);
       }
-
-      raf = requestAnimationFrame(frame);
     }
 
-    raf = requestAnimationFrame(frame);
+    const stop = animate(frame);
 
     return () => {
-      cancelAnimationFrame(raf);
+      stop();
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("resize", resize);
     };

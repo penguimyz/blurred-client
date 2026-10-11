@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { animate } from "../lib/animation";
 
 /**
  * Ambient sea life: shoals, jellyfish and the occasional shark drifting past
@@ -60,7 +61,10 @@ interface Creature {
   /** Fish per shoal; unused by other kinds. */
   count: number;
   seed: number;
-  /** Frames alive. Only the leviathan uses it — see `lifespan`. */
+  /**
+   * Age in 60Hz frames — fractional, since it accumulates elapsed time rather
+   * than counting repaints. Only the leviathan uses it — see `lifespan`.
+   */
   life: number;
   /**
    * Frames to live, or 0 for "until it swims off screen".
@@ -208,9 +212,12 @@ export function SeaLife() {
     }
 
     let lastSpawn = performance.now();
-    let raf = 0;
 
-    function frame(now: number) {
+    // Everything advances by `step` — elapsed time measured in 60Hz frames —
+    // so the tank drifts at the same pace on a 60Hz panel and a 240Hz one.
+    // `life` included: it drives the leviathan's fade and lifespan, which are
+    // durations, not counts of repaints.
+    function frame(step: number, now: number) {
       if (!ctx) return;
       ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
@@ -221,10 +228,10 @@ export function SeaLife() {
 
       for (let i = creatures.length - 1; i >= 0; i--) {
         const c = creatures[i];
-        c.x += c.vx;
-        c.y += c.vy;
-        c.phase += 0.03 + c.depth * 0.02;
-        c.life++;
+        c.x += c.vx * step;
+        c.y += c.vy * step;
+        c.phase += (0.03 + c.depth * 0.02) * step;
+        c.life += step;
 
         if (isGone(c)) {
           creatures.splice(i, 1);
@@ -232,14 +239,12 @@ export function SeaLife() {
         }
         draw(ctx, c);
       }
-
-      raf = requestAnimationFrame(frame);
     }
 
-    raf = requestAnimationFrame(frame);
+    const stop = animate(frame);
 
     return () => {
-      cancelAnimationFrame(raf);
+      stop();
       window.removeEventListener("resize", resize);
     };
   }, []);

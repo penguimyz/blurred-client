@@ -238,3 +238,29 @@ pub async fn download_if_missing(
     std::fs::write(dest, &bytes)?;
     Ok(())
 }
+
+/// Every Minecraft version you could run a server on, newest first.
+///
+/// Straight off Mojang's manifest, filtered to full releases by default —
+/// snapshots are in there too, but a server list offering `24w14potato` above
+/// the version someone actually wants is a worse list.
+///
+/// No caching layer: the manifest is a single small request, the UI asks for it
+/// when a picker opens rather than on a timer, and a stale cache would hide a
+/// version released this week. A failure is the caller's to handle — the
+/// Servers page falls back to a plain text field so an offline launcher can
+/// still be told which version to use.
+#[tauri::command]
+pub async fn list_mc_versions(include_snapshots: bool) -> Result<Vec<String>, String> {
+    let client = reqwest::Client::new();
+    let manifest = fetch_version_manifest(&client)
+        .await
+        .map_err(|e| format!("could not reach Mojang's version list: {e}"))?;
+
+    Ok(manifest
+        .versions
+        .into_iter()
+        .filter(|v| include_snapshots || v.version_type == "release")
+        .map(|v| v.id)
+        .collect())
+}
